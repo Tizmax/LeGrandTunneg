@@ -1,9 +1,27 @@
+import { useGame } from './game/useGame'
+import { MenuScreen } from './screens/MenuScreen'
+import { ThemesScreen } from './screens/ThemesScreen'
+import { SelectionScreen } from './screens/SelectionScreen'
+import { TunnelScreen } from './screens/TunnelScreen'
+import { EndScreen } from './screens/EndScreen'
+
 function App() {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-neutral-950 text-neutral-100">
-      <h1 className="text-4xl font-semibold">Le Grand Tunneg</h1>
-    </div>
-  )
+  const { state, dispatch } = useGame()
+
+  switch (state.phase) {
+    case 'menu':
+      return <MenuScreen state={state} dispatch={dispatch} />
+    case 'themes':
+      return <ThemesScreen state={state} dispatch={dispatch} />
+    case 'selection':
+      return <SelectionScreen state={state} dispatch={dispatch} />
+    case 'tunnel':
+      return <TunnelScreen state={state} dispatch={dispatch} />
+    case 'end':
+      return <EndScreen state={state} dispatch={dispatch} />
+    default:
+      return <MenuScreen state={state} dispatch={dispatch} />
+  }
 }
 
 export default App

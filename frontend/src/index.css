@@ -1,1 +1,173 @@
 @import "tailwindcss";
+
+@theme {
+  /* Palette "Jazz Club feutré / La La Land" */
+  --color-charcoal-950: #0c0a09;
+  --color-charcoal-900: #15120f;
+  --color-charcoal-800: #1f1a16;
+  --color-charcoal-700: #2b241e;
+
+  --color-amber-glow: #e8a33d;
+  --color-amber-dim: #c9822a;
+  --color-amber-ember: #a8651c;
+
+  --color-burgundy-900: #3b0f16;
+  --color-burgundy-700: #611722;
+  --color-burgundy-500: #8a2232;
+
+  --color-brass-400: #d4af6a;
+  --color-brass-600: #a9803f;
+
+  --color-nightblue-900: #0b1324;
+  --color-nightblue-700: #16254a;
+  --color-nightblue-500: #27417f;
+
+  --font-display: "Cormorant Garamond", "Playfair Display", Georgia, serif;
+  --font-body: "Manrope", "Inter", system-ui, sans-serif;
+
+  --shadow-stage: 0 20px 60px -10px rgba(0, 0, 0, 0.7), 0 0 80px -20px rgba(232, 163, 61, 0.25);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--color-charcoal-950);
+    color: #f1e6d8;
+    font-family: var(--font-body);
+    background-image:
+      radial-gradient(ellipse at top, rgba(232, 163, 61, 0.06), transparent 60%),
+      radial-gradient(ellipse at bottom, rgba(39, 65, 127, 0.08), transparent 55%);
+    background-attachment: fixed;
+  }
+
+  h1,
+  h2,
+  h3,
+  .font-display {
+    font-family: var(--font-display);
+  }
+}
+
+@layer utilities {
+  .vignette {
+    position: relative;
+  }
+  .vignette::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    box-shadow: inset 0 0 180px 60px rgba(0, 0, 0, 0.65);
+  }
+
+  .spotlight {
+    position: relative;
+  }
+  .spotlight::before {
+    content: "";
+    position: absolute;
+    inset: -10%;
+    pointer-events: none;
+    background: radial-gradient(
+      ellipse 60% 50% at 50% 20%,
+      rgba(232, 163, 61, 0.14),
+      transparent 70%
+    );
+    z-index: 0;
+  }
+
+  .grain-overlay {
+    position: relative;
+  }
+  .grain-overlay::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    mix-blend-mode: overlay;
+  }
+}
+
+@keyframes glow-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 10px 2px rgba(232, 163, 61, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 20px 6px rgba(232, 163, 61, 0.65);
+  }
+}
+
+.animate-glow-pulse {
+  animation: glow-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes square-ignite {
+  0% {
+    filter: brightness(0.5) saturate(0.5);
+    transform: scale(0.92);
+  }
+  60% {
+    filter: brightness(1.3) saturate(1.3);
+    transform: scale(1.04);
+  }
+  100% {
+    filter: brightness(1) saturate(1);
+    transform: scale(1);
+  }
+}
+
+.animate-square-ignite {
+  animation: square-ignite 0.6s ease-out;
+}
+
+@keyframes blink-red {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.animate-blink-red {
+  animation: blink-red 0.7s ease-in-out infinite;
+}
+
+@keyframes rise-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-rise-up {
+  animation: rise-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes screen-fade {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-screen-fade {
+  animation: screen-fade 0.45s ease-out both;
+}
