@@ -1,7 +1,9 @@
+import { motion } from 'framer-motion'
 import type { GameAction } from '../game/gameReducer'
 import type { GameState } from '../game/types'
 import { ScreenShell } from '../components/ScreenShell'
 import { Button } from '../components/Button'
+import { ArtDecoCorner } from '../components/decor/ArtDecoCorner'
 
 type EndScreenProps = {
   state: GameState
@@ -10,6 +12,11 @@ type EndScreenProps = {
 
 const PODIUM_HEIGHTS = ['h-36', 'h-28', 'h-20'] as const
 const PODIUM_LABELS = ['1er', '2e', '3e'] as const
+const PODIUM_GLOW = [
+  'shadow-[0_0_40px_-6px_rgba(255,215,122,0.7)] border-sunset-gold/70',
+  'shadow-[0_0_24px_-6px_rgba(212,175,106,0.5)] border-brass-400/60',
+  'shadow-[0_0_16px_-6px_rgba(169,128,63,0.4)] border-brass-600/50',
+] as const
 
 function biggestSingleCoffrage(state: GameState) {
   if (state.history.length === 0) return null
@@ -32,10 +39,13 @@ export function EndScreen({ state, dispatch }: EndScreenProps) {
   const bigCoffrage = biggestSingleCoffrage(state)
 
   return (
-    <ScreenShell spotlight>
+    <ScreenShell spotlight smoke>
       <div className="flex flex-1 flex-col items-center justify-center gap-10 py-8">
         <div className="animate-rise-up text-center">
-          <h1 className="font-display text-5xl font-bold text-amber-glow drop-shadow-[0_0_30px_rgba(232,163,61,0.3)]">
+          <p className="mb-2 text-xs tracking-[0.5em] text-brass-400/80 uppercase">
+            ★ Rideau final ★
+          </p>
+          <h1 className="marquee-text font-display text-5xl font-black sm:text-6xl">
             Partie terminée
           </h1>
           <p className="mt-3 text-sm tracking-[0.3em] text-[#9a8d7d] uppercase">
@@ -47,34 +57,46 @@ export function EndScreen({ state, dispatch }: EndScreenProps) {
           {visualOrder.map((player, i) => {
             const rankIndex = podium.indexOf(player)
             return (
-              <div
+              <motion.div
                 key={player.name}
-                className="animate-rise-up flex flex-col items-center gap-2"
-                style={{ animationDelay: `${i * 150}ms` }}
+                className="flex flex-col items-center gap-2"
+                initial={{ opacity: 0, y: 40 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{
+                  duration: 0.6,
+                  delay: 0.3 + i * 0.2,
+                  ease: [0.16, 1, 0.3, 1],
+                }}
               >
                 <span className="font-display text-lg font-semibold text-[#f1e6d8]">
                   {player.name}
                 </span>
-                <span className="text-xs text-[#9a8d7d]">{player.points} pts</span>
+                <span className="text-xs tracking-wide text-[#9a8d7d] tabular-nums">
+                  {player.points} pts
+                </span>
                 <div
-                  className={`flex w-24 items-start justify-center rounded-t-lg border border-brass-600/40 bg-gradient-to-b from-amber-glow/20 to-charcoal-800 pt-2 shadow-stage sm:w-32 ${PODIUM_HEIGHTS[rankIndex]}`}
+                  className={`relative flex w-24 items-start justify-center overflow-hidden rounded-t-lg border bg-gradient-to-b from-amber-glow/25 via-charcoal-800 to-charcoal-900 pt-2 shadow-stage-lg sm:w-32 ${PODIUM_HEIGHTS[rankIndex]} ${PODIUM_GLOW[rankIndex]}`}
                 >
-                  <span className="font-display text-2xl font-bold text-amber-glow">
+                  <div className="pointer-events-none absolute inset-x-0 top-0 h-6 bg-gradient-to-b from-white/15 to-transparent" />
+                  <span className="marquee-text font-display text-2xl font-black">
                     {PODIUM_LABELS[rankIndex]}
                   </span>
                 </div>
-              </div>
+              </motion.div>
             )
           })}
         </div>
 
         {bigCoffrage && (
-          <div className="animate-rise-up rounded-xl border border-brass-600/30 bg-charcoal-900 px-6 py-4 text-center shadow-stage">
+          <div className="string-lights animate-rise-up relative rounded-xl border border-brass-600/30 bg-gradient-to-b from-charcoal-800 to-charcoal-900 px-6 py-4 text-center shadow-stage">
+            <ArtDecoCorner position="top-left" />
+            <ArtDecoCorner position="top-right" />
             <p className="text-xs tracking-[0.25em] text-[#9a8d7d] uppercase">
               Plus gros coffrage de la partie
             </p>
             <p className="font-display mt-1 text-xl text-[#f1e6d8]">
-              {bigCoffrage.playerName} — {bigCoffrage.pointsGained} pts sur « {bigCoffrage.themeLabel} »
+              {bigCoffrage.playerName} — {bigCoffrage.pointsGained} pts sur « {bigCoffrage.themeLabel}{' '}
+              »
             </p>
           </div>
         )}

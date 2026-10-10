@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @theme {
-  /* Palette "Jazz Club feutré / La La Land" */
+  /* Palette "Jazz Club feutré / La La Land / Soul" — passe maximaliste */
   --color-charcoal-950: #0c0a09;
   --color-charcoal-900: #15120f;
   --color-charcoal-800: #1f1a16;
@@ -22,10 +22,19 @@
   --color-nightblue-700: #16254a;
   --color-nightblue-500: #27417f;
 
-  --font-display: "Cormorant Garamond", "Playfair Display", Georgia, serif;
+  /* Trio "coucher de soleil La La Land" pour dégradés de titres & aurores */
+  --color-sunset-gold: #ffd77a;
+  --color-sunset-orange: #ff9a56;
+  --color-sunset-pink: #ff6f91;
+  --color-sunset-violet: #7c4f8c;
+
+  --font-display: "Playfair Display", "Cormorant Garamond", Georgia, serif;
+  --font-script: "Cormorant Garamond", "Playfair Display", Georgia, serif;
   --font-body: "Manrope", "Inter", system-ui, sans-serif;
 
-  --shadow-stage: 0 20px 60px -10px rgba(0, 0, 0, 0.7), 0 0 80px -20px rgba(232, 163, 61, 0.25);
+  --shadow-stage: 0 20px 60px -10px rgba(0, 0, 0, 0.75), 0 0 90px -16px rgba(232, 163, 61, 0.3);
+  --shadow-stage-lg:
+    0 30px 90px -15px rgba(0, 0, 0, 0.8), 0 0 140px -20px rgba(255, 154, 86, 0.3);
 }
 
 @layer base {
@@ -39,10 +48,7 @@
     background-color: var(--color-charcoal-950);
     color: #f1e6d8;
     font-family: var(--font-body);
-    background-image:
-      radial-gradient(ellipse at top, rgba(232, 163, 61, 0.06), transparent 60%),
-      radial-gradient(ellipse at bottom, rgba(39, 65, 127, 0.08), transparent 55%);
-    background-attachment: fixed;
+    overflow-x: hidden;
   }
 
   h1,
@@ -54,6 +60,52 @@
 }
 
 @layer utilities {
+  /* ---------- Fond vivant : aurore chaude animée ---------- */
+  .bg-aurora {
+    position: relative;
+    isolation: isolate;
+  }
+  .bg-aurora::before {
+    content: "";
+    position: fixed;
+    inset: -10%;
+    pointer-events: none;
+    z-index: -3;
+    background:
+      radial-gradient(ellipse 55% 40% at 20% 15%, rgba(255, 111, 145, 0.14), transparent 60%),
+      radial-gradient(ellipse 60% 45% at 85% 10%, rgba(232, 163, 61, 0.16), transparent 60%),
+      radial-gradient(ellipse 70% 60% at 50% 100%, rgba(39, 65, 127, 0.22), transparent 65%),
+      radial-gradient(ellipse 40% 35% at 75% 70%, rgba(124, 79, 140, 0.12), transparent 60%);
+    background-size: 160% 160%;
+    animation: aurora-drift 22s ease-in-out infinite alternate;
+  }
+  .bg-aurora::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: -2;
+    background-color: var(--color-charcoal-950);
+    opacity: 0;
+  }
+
+  /* ---------- Bokeh de lumières floutées en arrière-plan ---------- */
+  .bokeh-field {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .bokeh-dot {
+    position: absolute;
+    border-radius: 9999px;
+    filter: blur(2px);
+    opacity: 0.55;
+    will-change: transform, opacity;
+  }
+
+  /* ---------- Vignette + grain ---------- */
   .vignette {
     position: relative;
   }
@@ -62,7 +114,7 @@
     position: absolute;
     inset: 0;
     pointer-events: none;
-    box-shadow: inset 0 0 180px 60px rgba(0, 0, 0, 0.65);
+    box-shadow: inset 0 0 220px 80px rgba(0, 0, 0, 0.72);
   }
 
   .spotlight {
@@ -75,7 +127,7 @@
     pointer-events: none;
     background: radial-gradient(
       ellipse 60% 50% at 50% 20%,
-      rgba(232, 163, 61, 0.14),
+      rgba(232, 163, 61, 0.16),
       transparent 70%
     );
     z-index: 0;
@@ -86,13 +138,202 @@
   }
   .grain-overlay::after {
     content: "";
-    position: absolute;
+    position: fixed;
     inset: 0;
     pointer-events: none;
-    opacity: 0.035;
+    opacity: 0.045;
+    z-index: 50;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
     mix-blend-mode: overlay;
   }
+
+  /* ---------- Typographie "marquee" / enseigne de club ---------- */
+  .marquee-text {
+    background-image: linear-gradient(
+      100deg,
+      var(--color-sunset-gold) 0%,
+      var(--color-sunset-orange) 40%,
+      var(--color-sunset-pink) 72%,
+      var(--color-brass-400) 100%
+    );
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+    text-shadow:
+      0 0 6px rgba(255, 215, 122, 0.55),
+      0 0 18px rgba(255, 154, 86, 0.45),
+      0 0 42px rgba(255, 111, 145, 0.3),
+      0 0 80px rgba(232, 163, 61, 0.25);
+    filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.5));
+  }
+
+  /* ---------- Guirlande lumineuse décorative ---------- */
+  .string-lights {
+    position: relative;
+  }
+  .string-lights::before {
+    content: "";
+    position: absolute;
+    top: -9px;
+    left: 10px;
+    right: 10px;
+    height: 10px;
+    pointer-events: none;
+    background-image: radial-gradient(
+      circle,
+      rgba(255, 215, 122, 0.95) 0 2.5px,
+      rgba(255, 215, 122, 0.15) 3px 4px,
+      transparent 4.5px
+    );
+    background-size: 26px 10px;
+    background-repeat: repeat-x;
+    animation: twinkle-bulb 2.4s ease-in-out infinite;
+    filter: drop-shadow(0 0 4px rgba(255, 180, 90, 0.8));
+  }
+
+  /* ---------- Coin art déco (ornement SVG) ---------- */
+  .art-deco-corner {
+    position: absolute;
+    width: 34px;
+    height: 34px;
+    opacity: 0.55;
+    pointer-events: none;
+    color: var(--color-brass-400);
+  }
+
+  /* ---------- Rideau de scène ----------
+     Pas de position/inset ici : le composant CurtainReveal fixe lui-même
+     le positionnement via classes Tailwind (fixed/inset-y-0/left-0/w-1/2)
+     pour éviter tout conflit de cascade avec cette classe décorative.
+     Le panneau droit utilise un dégradé en miroir (.curtain-panel-right)
+     plutôt qu'un `scale-x-[-1]` : framer-motion écrit sa propre valeur de
+     `transform` en style inline, qui écrase intégralement toute classe
+     Tailwind posant aussi `transform` (pas de composition) — le flip serait
+     silencieusement perdu dès que l'animation `x` démarre. */
+  .curtain-panel {
+    background: linear-gradient(
+      90deg,
+      var(--color-burgundy-900) 0%,
+      var(--color-burgundy-700) 45%,
+      var(--color-burgundy-500) 100%
+    );
+    box-shadow: inset -20px 0 40px -10px rgba(0, 0, 0, 0.6);
+  }
+
+  .curtain-panel-right {
+    background: linear-gradient(
+      270deg,
+      var(--color-burgundy-900) 0%,
+      var(--color-burgundy-700) 45%,
+      var(--color-burgundy-500) 100%
+    );
+    box-shadow: inset 20px 0 40px -10px rgba(0, 0, 0, 0.6);
+  }
+
+  /* ---------- Balayage lumineux de transition ---------- */
+  .light-sweep {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    pointer-events: none;
+    background: linear-gradient(
+      100deg,
+      transparent 40%,
+      rgba(255, 215, 122, 0.22) 48%,
+      rgba(255, 215, 122, 0.4) 50%,
+      rgba(255, 215, 122, 0.22) 52%,
+      transparent 60%
+    );
+    transform: translateX(-120%);
+    animation: sweep-across 0.85s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bg-aurora::before,
+  .bokeh-dot,
+  .string-lights::before,
+  .animate-glow-pulse,
+  .animate-spot-sweep {
+    animation: none !important;
+  }
+}
+
+@keyframes aurora-drift {
+  0% {
+    background-position:
+      0% 0%,
+      100% 0%,
+      50% 100%,
+      75% 70%;
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    background-position:
+      10% 15%,
+      85% 15%,
+      45% 90%,
+      65% 60%;
+    opacity: 0.9;
+  }
+}
+
+@keyframes bokeh-float {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(18px, -24px) scale(1.08);
+  }
+}
+
+@keyframes bokeh-float-alt {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(-22px, 20px) scale(0.94);
+  }
+}
+
+@keyframes twinkle-bulb {
+  0%,
+  100% {
+    opacity: 1;
+    filter: drop-shadow(0 0 4px rgba(255, 180, 90, 0.8));
+  }
+  50% {
+    opacity: 0.6;
+    filter: drop-shadow(0 0 2px rgba(255, 180, 90, 0.4));
+  }
+}
+
+@keyframes sweep-across {
+  to {
+    transform: translateX(120%);
+  }
+}
+
+@keyframes spot-sweep {
+  0%,
+  100% {
+    transform: translateX(-30%);
+    opacity: 0.6;
+  }
+  50% {
+    transform: translateX(30%);
+    opacity: 1;
+  }
+}
+
+.animate-spot-sweep {
+  animation: spot-sweep 6s ease-in-out infinite;
 }
 
 @keyframes glow-pulse {
@@ -115,8 +356,8 @@
     transform: scale(0.92);
   }
   60% {
-    filter: brightness(1.3) saturate(1.3);
-    transform: scale(1.04);
+    filter: brightness(1.4) saturate(1.4);
+    transform: scale(1.06);
   }
   100% {
     filter: brightness(1) saturate(1);

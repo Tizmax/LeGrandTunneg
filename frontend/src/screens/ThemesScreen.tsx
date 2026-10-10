@@ -3,6 +3,7 @@ import type { GameAction } from '../game/gameReducer'
 import type { GameState } from '../game/types'
 import { ScreenShell } from '../components/ScreenShell'
 import { Button } from '../components/Button'
+import { ArtDecoCorner } from '../components/decor/ArtDecoCorner'
 
 type ThemesScreenProps = {
   state: GameState
@@ -21,10 +22,13 @@ export function ThemesScreen({ state, dispatch }: ThemesScreenProps) {
   const canStart = state.themes.length >= 1
 
   return (
-    <ScreenShell spotlight>
+    <ScreenShell spotlight smoke>
       <div className="flex flex-1 flex-col items-center justify-center gap-10">
         <div className="animate-rise-up text-center">
-          <h1 className="font-display text-4xl font-bold text-amber-glow sm:text-5xl">
+          <p className="mb-2 text-xs tracking-[0.5em] text-brass-400/80 uppercase">
+            ★ Entracte confidentiel ★
+          </p>
+          <h1 className="marquee-text font-display text-4xl font-black sm:text-6xl">
             Les thèmes secrets
           </h1>
           <p className="mt-3 text-sm tracking-[0.3em] text-[#9a8d7d] uppercase">
@@ -32,7 +36,11 @@ export function ThemesScreen({ state, dispatch }: ThemesScreenProps) {
           </p>
         </div>
 
-        <div className="animate-rise-up w-full max-w-md rounded-2xl border border-brass-600/30 bg-charcoal-900 p-6 shadow-stage">
+        <div className="string-lights animate-rise-up relative w-full max-w-md rounded-2xl border border-brass-600/30 bg-gradient-to-b from-charcoal-800 to-charcoal-900 p-6 shadow-stage-lg">
+          <ArtDecoCorner position="top-left" />
+          <ArtDecoCorner position="top-right" />
+          <ArtDecoCorner position="bottom-left" />
+          <ArtDecoCorner position="bottom-right" />
           <div className="flex gap-2">
             <input
               type="password"
@@ -43,7 +51,7 @@ export function ThemesScreen({ state, dispatch }: ThemesScreenProps) {
               }}
               placeholder="Thème secret"
               maxLength={30}
-              className="flex-1 rounded-lg border border-brass-600/30 bg-charcoal-800 px-4 py-2.5 text-[#f1e6d8] placeholder-[#6b625b] outline-none focus:border-amber-glow"
+              className="flex-1 rounded-lg border border-brass-600/30 bg-charcoal-900/80 px-4 py-2.5 text-[#f1e6d8] placeholder-[#6b625b] shadow-[inset_0_2px_6px_rgba(0,0,0,0.4)] outline-none focus:border-amber-glow focus:shadow-[inset_0_2px_6px_rgba(0,0,0,0.4),0_0_0_3px_rgba(232,163,61,0.2)]"
             />
             <Button variant="primary" onClick={handleAdd} disabled={!label.trim()}>
               Ajouter
@@ -55,14 +63,14 @@ export function ThemesScreen({ state, dispatch }: ThemesScreenProps) {
               {state.themes.map((theme, i) => (
                 <li
                   key={i}
-                  className="flex items-center justify-between rounded-lg bg-charcoal-800/70 px-4 py-2"
+                  className="flex items-center justify-between rounded-lg border border-white/5 bg-charcoal-900/60 px-4 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
                 >
                   <span className="font-display text-lg tracking-[0.3em] text-[#f1e6d8]">
                     {'●'.repeat(Math.min(theme.label.length, 12))}
                   </span>
                   <button
                     onClick={() => dispatch({ type: 'REMOVE_THEME', index: i })}
-                    className="cursor-pointer text-xs tracking-wide text-burgundy-500 uppercase hover:text-burgundy-500/70"
+                    className="cursor-pointer text-xs tracking-wide text-burgundy-500 uppercase transition-colors hover:text-burgundy-500/70"
                   >
                     Retirer
                   </button>
