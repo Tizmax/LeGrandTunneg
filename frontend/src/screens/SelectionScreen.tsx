@@ -1,5 +1,6 @@
 import type { GameAction } from '../game/gameReducer'
 import type { GameState } from '../game/types'
+import type { ViewRole } from '../viewRole'
 import { ScreenShell } from '../components/ScreenShell'
 import { Button } from '../components/Button'
 import { ScoreBoard } from '../components/ScoreBoard'
@@ -9,10 +10,21 @@ import { ArtDecoCorner } from '../components/decor/ArtDecoCorner'
 type SelectionScreenProps = {
   state: GameState
   dispatch: React.Dispatch<GameAction>
+  role: ViewRole
 }
 
-export function SelectionScreen({ state, dispatch }: SelectionScreenProps) {
+/**
+ * Choix du thème (choice_open) : la sélection appartient au Joueur, pas au
+ * Présentateur. Les 3 vues partagent cette grille mais avec des capacités
+ * différentes :
+ * - Joueur : grille cliquable (c'est son choix).
+ * - Présentateur : grille en lecture seule + vue d'ensemble room + actions
+ *   réservées (Réinitialiser/Retour menu).
+ * - Écran principal : grille en lecture seule, aucun contrôle.
+ */
+export function SelectionScreen({ state, dispatch, role }: SelectionScreenProps) {
   const currentPlayer = state.players[state.currentPlayerIndex]
+  const isInteractive = role === 'joueur'
 
   return (
     <ScreenShell>
@@ -22,50 +34,75 @@ export function SelectionScreen({ state, dispatch }: SelectionScreenProps) {
             Tour de {currentPlayer?.name}
           </h2>
           <ScoreBoard players={state.players} currentPlayerIndex={state.currentPlayerIndex} />
+          {role === 'presentateur' && (
+            <p className="text-xs tracking-wide text-[#9a8d7d] uppercase">
+              En attente du choix du joueur
+            </p>
+          )}
         </div>
 
         <div className="animate-rise-up grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {state.themes.map((theme, i) => (
-            <button
-              key={i}
-              disabled={theme.completed}
-              onClick={() => dispatch({ type: 'SELECT_THEME', index: i })}
-              className={`group relative flex flex-col gap-4 overflow-hidden rounded-xl border p-5 text-left transition-all duration-300 ${
-                theme.completed
-                  ? 'cursor-not-allowed border-charcoal-700 bg-charcoal-900/50 opacity-40 grayscale'
-                  : 'cursor-pointer border-brass-600/30 bg-gradient-to-b from-charcoal-800 to-charcoal-900 shadow-stage hover:-translate-y-1 hover:border-amber-glow hover:shadow-[0_14px_34px_-6px_rgba(232,163,61,0.4),0_0_30px_-8px_rgba(232,163,61,0.3)]'
-              }`}
-            >
-              {!theme.completed && (
-                <>
-                  <ArtDecoCorner position="top-left" className="opacity-30 group-hover:opacity-60" />
-                  <ArtDecoCorner
-                    position="bottom-right"
-                    className="opacity-30 group-hover:opacity-60"
-                  />
-                </>
-              )}
-              <span className="font-display text-xl font-semibold text-[#f1e6d8]">
-                {theme.label}
-                {theme.completed && (
-                  <span className="ml-2 text-xs font-normal text-[#7a6f63] uppercase">
-                    (terminé)
-                  </span>
+          {state.themes.map((theme, i) => {
+            const disabled = theme.completed || !isInteractive
+            const content = (
+              <>
+                {!theme.completed && (
+                  <>
+                    <ArtDecoCorner
+                      position="top-left"
+                      className="opacity-30 group-hover:opacity-60"
+                    />
+                    <ArtDecoCorner
+                      position="bottom-right"
+                      className="opacity-30 group-hover:opacity-60"
+                    />
+                  </>
                 )}
-              </span>
-              <MiniProgressBar theme={theme} />
-            </button>
-          ))}
+                <span className="font-display text-xl font-semibold text-[#f1e6d8]">
+                  {theme.label}
+                  {theme.completed && (
+                    <span className="ml-2 text-xs font-normal text-[#7a6f63] uppercase">
+                      (terminé)
+                    </span>
+                  )}
+                </span>
+                <MiniProgressBar theme={theme} />
+              </>
+            )
+            const className = `group relative flex flex-col gap-4 overflow-hidden rounded-xl border p-5 text-left transition-all duration-300 ${
+              theme.completed
+                ? 'cursor-not-allowed border-charcoal-700 bg-charcoal-900/50 opacity-40 grayscale'
+                : isInteractive
+                  ? 'cursor-pointer border-brass-600/30 bg-gradient-to-b from-charcoal-800 to-charcoal-900 shadow-stage hover:-translate-y-1 hover:border-amber-glow hover:shadow-[0_14px_34px_-6px_rgba(232,163,61,0.4),0_0_30px_-8px_rgba(232,163,61,0.3)]'
+                  : 'border-brass-600/20 bg-gradient-to-b from-charcoal-800/70 to-charcoal-900/70'
+            }`
+            return isInteractive ? (
+              <button
+                key={i}
+                disabled={disabled}
+                onClick={() => dispatch({ type: 'SELECT_THEME', index: i })}
+                className={className}
+              >
+                {content}
+              </button>
+            ) : (
+              <div key={i} className={className}>
+                {content}
+              </div>
+            )
+          })}
         </div>
 
-        <div className="animate-rise-up flex justify-center gap-4 pt-4">
-          <Button variant="secondary" onClick={() => dispatch({ type: 'RESET_GAME' })}>
-            Réinitialiser la partie
-          </Button>
-          <Button variant="ghost" onClick={() => dispatch({ type: 'QUIT_TO_MENU' })}>
-            Retour au menu
-          </Button>
-        </div>
+        {role === 'presentateur' && (
+          <div className="animate-rise-up flex justify-center gap-4 pt-4">
+            <Button variant="secondary" onClick={() => dispatch({ type: 'RESET_GAME' })}>
+              Réinitialiser la partie
+            </Button>
+            <Button variant="ghost" onClick={() => dispatch({ type: 'QUIT_TO_MENU' })}>
+              Retour au menu
+            </Button>
+          </div>
+        )}
       </div>
     </ScreenShell>
   )

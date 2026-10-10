@@ -15,13 +15,15 @@ export type Player = {
 export type GamePhase =
   | 'menu' // player entry
   | 'themes' // theme entry (blind)
-  | 'selection' // theme selection board
+  | 'selection-pending' // choice_pending : le choix de thème est éligible mais pas encore révélé par le Présentateur
+  | 'selection' // choice_open : la grille de sélection du thème est révélée, visible/cliquable
   | 'tunnel' // in-game tunnel for a theme
   | 'end' // end-game podium
 
 export type TunnelSubPhase =
-  | 'question' // a question was just asked, awaiting outcome
-  | 'after-success' // good answer just given, risk/reward choice
+  | 'question' // a question was just asked, awaiting outcome (pas concerné par la couche show)
+  | 'after-success-pending' // choice_pending : bonne réponse non terminale, Continuer/Coffrer éligible mais pas encore révélé
+  | 'after-success-open' // choice_open : Continuer/Coffrer révélés, visibles/cliquables par le joueur
 
 export type SquareColor = 'black' | 'gray' | 'green' | 'yellow' | 'empty'
 

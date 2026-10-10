@@ -1,22 +1,37 @@
 import type { GameAction } from '../game/gameReducer'
 import type { GameState } from '../game/types'
+import type { ViewRole } from '../viewRole'
 import { ScreenShell } from '../components/ScreenShell'
 import { Button } from '../components/Button'
 import { ScoreBoard } from '../components/ScoreBoard'
 import { Tunnel } from '../components/Tunnel'
 import { CountdownTimer } from '../components/CountdownTimer'
 import { CurtainReveal } from '../components/decor/CurtainReveal'
+import { RoomOverview } from '../components/RoomOverview'
+import { ChoicePendingScreen } from './ChoicePendingScreen'
 
 type TunnelScreenProps = {
   state: GameState
   dispatch: React.Dispatch<GameAction>
+  role: ViewRole
 }
 
-export function TunnelScreen({ state, dispatch }: TunnelScreenProps) {
+export function TunnelScreen({ state, dispatch, role }: TunnelScreenProps) {
   const theme = state.activeThemeIndex !== null ? state.themes[state.activeThemeIndex] : null
   const currentPlayer = state.players[state.currentPlayerIndex]
 
   if (!theme) return null
+
+  // Couche show : choix Continuer/Coffrer pas encore révélé par le
+  // Présentateur -> écran d'attente neutre, aucune option visible.
+  if (state.tunnelSubPhase === 'after-success-pending') {
+    return (
+      <ChoicePendingScreen state={state} dispatch={dispatch} isPresenterView={role === 'presentateur'} />
+    )
+  }
+
+  const isPresenter = role === 'presentateur'
+  const isPlayer = role === 'joueur'
 
   return (
     <ScreenShell spotlight smoke>
@@ -44,7 +59,10 @@ export function TunnelScreen({ state, dispatch }: TunnelScreenProps) {
           </div>
 
           <div className="animate-rise-up flex flex-wrap justify-center gap-4 pt-2">
-            {state.tunnelSubPhase === 'question' && (
+            {/* Bonne réponse / Mauvaise réponse / Passer : jugement de la
+                réponse, réservé au Présentateur (lui seul connaît la bonne
+                réponse) — jamais visible côté Joueur ni Écran principal. */}
+            {isPresenter && state.tunnelSubPhase === 'question' && (
               <>
                 <Button variant="primary" onClick={() => dispatch({ type: 'GOOD_ANSWER' })}>
                   Bonne réponse
@@ -58,7 +76,15 @@ export function TunnelScreen({ state, dispatch }: TunnelScreenProps) {
               </>
             )}
 
-            {state.tunnelSubPhase === 'after-success' && (
+            {isPlayer && state.tunnelSubPhase === 'question' && (
+              <p className="text-xs tracking-wide text-[#9a8d7d] uppercase">
+                Le Présentateur juge la réponse…
+              </p>
+            )}
+
+            {/* Continuer / Coffrer : choix révélé (choice_open), appartient
+                au Joueur — jamais au Présentateur. */}
+            {isPlayer && state.tunnelSubPhase === 'after-success-open' && (
               <>
                 <Button variant="primary" onClick={() => dispatch({ type: 'CONTINUE' })}>
                   Continuer
@@ -69,6 +95,12 @@ export function TunnelScreen({ state, dispatch }: TunnelScreenProps) {
               </>
             )}
           </div>
+
+          {isPresenter && (
+            <div className="animate-rise-up w-full">
+              <RoomOverview themes={state.themes} />
+            </div>
+          )}
         </div>
       </CurtainReveal>
     </ScreenShell>

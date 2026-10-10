@@ -16,6 +16,11 @@ export type GameAction =
   | { type: 'COFFRER' }
   | { type: 'RESET_GAME' }
   | { type: 'QUIT_TO_MENU' }
+  // Couche show : fait passer un choix joueur de choice_pending à choice_open.
+  // Déclenchée par le Présentateur (bouton "Lancer le choix"). S'applique au
+  // choix de thème (phase 'selection-pending' -> 'selection') et au choix
+  // Continuer/Coffrer (tunnelSubPhase 'after-success-pending' -> 'after-success-open').
+  | { type: 'REVEAL_CHOICE' }
 
 export const initialState: GameState = {
   phase: 'menu',
@@ -79,7 +84,9 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       const startIndex = Math.floor(Math.random() * state.players.length)
       return {
         ...state,
-        phase: 'selection',
+        // Couche show : le choix de thème du premier tour est éligible mais
+        // reste caché tant que le Présentateur n'a pas lancé le choix.
+        phase: 'selection-pending',
         currentPlayerIndex: startIndex,
         activeThemeIndex: null,
         tunnelSubPhase: null,
@@ -88,6 +95,8 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
     }
 
     case 'SELECT_THEME': {
+      // Le choix ne peut être tranché que lorsqu'il a été révélé (choice_open).
+      if (state.phase !== 'selection') return state
       const theme = state.themes[action.index]
       if (!theme || theme.completed) return state
       const updatedThemes = state.themes.map((t, i) =>
@@ -130,7 +139,10 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
           players,
           history,
           currentPlayerIndex: nextPlayerIndex(state.currentPlayerIndex, state.players.length),
-          phase: completed ? 'end' : 'selection',
+          // Coffrage automatique case 10 : AUCUN choix humain à révéler, pas
+          // concerné par la couche show, on repasse directement par le
+          // choice_pending du prochain tour de sélection de thème.
+          phase: completed ? 'end' : 'selection-pending',
           activeThemeIndex: null,
           tunnelSubPhase: null,
         }
@@ -139,14 +151,16 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       return {
         ...state,
         themes: updatedThemes,
-        tunnelSubPhase: 'after-success',
+        // Couche show : le choix Continuer/Coffrer est éligible mais reste
+        // caché tant que le Présentateur n'a pas lancé le choix.
+        tunnelSubPhase: 'after-success-pending',
       }
     }
 
     case 'BAD_ANSWER': {
       return {
         ...state,
-        phase: 'selection',
+        phase: 'selection-pending',
         activeThemeIndex: null,
         tunnelSubPhase: null,
         currentPlayerIndex: nextPlayerIndex(state.currentPlayerIndex, state.players.length),
@@ -185,8 +199,10 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
           players,
           history,
           // Passer : le joueur courant ne change PAS, mais le thème est
-          // terminé automatiquement donc on revient à la sélection.
-          phase: completed ? 'end' : 'selection',
+          // terminé automatiquement donc on revient à la sélection (couche
+          // show : coffrage auto, pas de choix humain à révéler ici, mais le
+          // prochain tour de sélection de thème repasse par choice_pending).
+          phase: completed ? 'end' : 'selection-pending',
           activeThemeIndex: null,
           tunnelSubPhase: null,
         }
@@ -194,7 +210,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
 
       return {
         ...state,
-        phase: 'selection',
+        phase: 'selection-pending',
         themes: updatedThemes,
         activeThemeIndex: null,
         tunnelSubPhase: null,
@@ -203,7 +219,10 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
     }
 
     case 'CONTINUE': {
-      if (state.activeThemeIndex === null) return state
+      // Action du joueur une fois le choix Continuer/Coffrer révélé et tranché.
+      if (state.activeThemeIndex === null || state.tunnelSubPhase !== 'after-success-open') {
+        return state
+      }
       const idx = state.activeThemeIndex
       const updatedThemes = state.themes.map((t, i) =>
         i === idx ? { ...t, discovered: true } : t,
@@ -216,7 +235,10 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
     }
 
     case 'COFFRER': {
-      if (state.activeThemeIndex === null) return state
+      // Action du joueur une fois le choix Continuer/Coffrer révélé et tranché.
+      if (state.activeThemeIndex === null || state.tunnelSubPhase !== 'after-success-open') {
+        return state
+      }
       const idx = state.activeThemeIndex
       const theme = state.themes[idx]
       const { theme: coffredTheme, pointsGained } = coffrer(theme)
@@ -239,7 +261,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         themes: updatedThemes,
         players,
         history,
-        phase: completed ? 'end' : 'selection',
+        phase: completed ? 'end' : 'selection-pending',
         activeThemeIndex: null,
         tunnelSubPhase: null,
         currentPlayerIndex: nextPlayerIndex(state.currentPlayerIndex, state.players.length),
@@ -255,12 +277,25 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         activeThemeIndex: null,
         tunnelSubPhase: null,
         history: [],
-        phase: 'selection',
+        phase: 'selection-pending',
       }
     }
 
     case 'QUIT_TO_MENU': {
       return initialState
+    }
+
+    case 'REVEAL_CHOICE': {
+      // Couche show, actionnée par le Présentateur : fait passer le choix
+      // joueur actuellement en attente (choice_pending) à l'état révélé
+      // (choice_open), sans toucher au reste de l'état.
+      if (state.phase === 'selection-pending') {
+        return { ...state, phase: 'selection' }
+      }
+      if (state.tunnelSubPhase === 'after-success-pending') {
+        return { ...state, tunnelSubPhase: 'after-success-open' }
+      }
+      return state
     }
 
     default:

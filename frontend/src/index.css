@@ -1,3 +1,47 @@
+/**
+ * ============================================================================
+ * GUIDE D'USAGE DU DESIGN SYSTEM — "Jazz Club feutré / La La Land / Soul"
+ * ============================================================================
+ * Convention d'usage des tokens `--color-*` et `--font-*` ci-dessous, basée
+ * sur l'usage réel observé dans le code (composants Button, ScoreBoard,
+ * SquareColors, Tunnel, décors). Voir aussi la page de démonstration
+ * interne : StyleguideScreen (accessible via ?debug=styleguide).
+ *
+ * COULEURS
+ * - charcoal (950/900/800/700)  → Fonds de scène, panneaux, dégradés sombres.
+ *   Jamais utilisé pour du texte ou des accents, uniquement des surfaces.
+ * - amber (glow/dim/ember)      → CTA PRIMAIRES (Button variant="primary"),
+ *   mise en avant du joueur actif (ScoreBoard), case "franchie" (verte, via
+ *   les ombres/glow). C'est la couleur d'action/validation principale.
+ * - burgundy (900/700/500)      → DANGER / erreur / suppression
+ *   (Button variant="danger", bouton "Retirer" joueur/thème), rideaux de
+ *   scène (CurtainReveal), et alerte du chrono sous 10 secondes.
+ * - brass (400/600)             → Bordures dorées / laiton, ornements Art
+ *   Déco (ArtDecoCorner), Button variant="secondary" (bordure) et "gold"
+ *   (dégradé). C'est la couleur des cadres et séparateurs élégants.
+ * - nightblue (900/700/500)     → Touches FROIDES, réservées à l'arrière-plan
+ *   (dégradé radial de .bg-aurora). Ne pas l'utiliser en classe Tailwind
+ *   directe sur un composant UI (texte, bordure, fond de bouton) — son rôle
+ *   est de nuancer l'ambiance générale, jamais d'être un accent visible.
+ * - sunset (gold/orange/pink/violet) → Trio "coucher de soleil" pour les
+ *   DÉGRADÉS DE TITRES (.marquee-text) et le bouton "gold". `sunset-gold`
+ *   sert aussi pour la case "en jeu" (jaune) du tunnel. `sunset-violet` est
+ *   réservé aux dégradés larges (aurore, fonds), pas aux accents ponctuels.
+ *
+ * TYPOGRAPHIE
+ * - --font-display ("Playfair Display") → Tous les TITRES (h1/h2/h3 et
+ *   classe .font-display) : noms de thème, titres d'écran, podium.
+ * - --font-script ("Cormorant Garamond") → Défini pour un usage futur
+ *   (accents calligraphiques ponctuels) ; non utilisé actuellement.
+ * - --font-body ("Manrope")     → TEXTE COURANT : labels, paragraphes,
+ *   contenu de jeu. Appliqué par défaut sur <body>.
+ *
+ * OMBRES
+ * - --shadow-stage / --shadow-stage-lg → Réservées aux panneaux/éléments
+ *   importants (cartes de sélection, tunnel) pour un effet de scène
+ *   dramatique ; ne pas appliquer sur des éléments mineurs.
+ * ============================================================================
+ */
 @import "tailwindcss";
 
 @theme {
