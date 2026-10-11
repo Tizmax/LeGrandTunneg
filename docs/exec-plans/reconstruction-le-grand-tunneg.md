@@ -175,7 +175,7 @@ Un thème avec `completed == true` (coffré jusqu'à la case 10) doit être non-
   - Done when : chaque effet sonore listé se déclenche sur l'événement correspondant pendant un playtest ; le mute persiste après rechargement de page ; les assets audio utilisés sont committés ou leur source libre de droits est documentée dans le README.
   - Depends on : Bloc 7.
 
-- [ ] **Bloc 9 — Packaging déploiement Railway (service unique)**
+- [x] **Bloc 9 — Packaging déploiement Railway (service unique)**
   - Déliverable : configuration de build qui produit le bundle React statique et le fait servir par FastAPI (fichiers statiques + fallback SPA), fichier `Procfile` ou configuration Nixpacks adaptée, lecture de `SECRET_KEY`/`DATABASE_URL`/`PORT` depuis l'environnement, bind `0.0.0.0`, `debug` désactivé, endpoint de health check.
   - Done when : un déploiement Railway (ou une simulation locale équivalente type `docker run` avec les mêmes variables d'env) sert à la fois l'API/WS et le frontend buildé depuis un seul process ; aucune valeur sensible ou host/port n'est codée en dur dans le code ; le plugin Postgres Railway peut être branché via `DATABASE_URL` sans modification de code.
   - Depends on : Bloc 5, Bloc 7.
