@@ -22,8 +22,8 @@ export function createNetworkDispatch(send: (message: OutgoingMessage) => void) 
       case 'REMOVE_PLAYER':
         send({ type: 'player:remove', payload: { index: action.index } })
         return
-      case 'GO_TO_THEMES':
-        send({ type: 'lobby:go_to_themes', payload: {} })
+      case 'RENAME_SELF':
+        send({ type: 'player:rename', payload: { name: action.name } })
         return
       case 'ADD_THEME':
         send({ type: 'theme:add', payload: { label: action.label } })

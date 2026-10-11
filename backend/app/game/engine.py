@@ -102,7 +102,14 @@ def _record_coffrage(
     )
 
 
-# --- Lobby : joueurs & thèmes ------------------------------------------------
+# --- Lobby : joueurs, thèmes, renommage --------------------------------------
+#
+# Fusion 2026-10-11 : les anciennes phases 'menu' (attente joueurs) et
+# 'themes' (saisie des thèmes) sont unifiées en une seule phase 'lobby' —
+# tout se passe sur le même écran (liste des joueurs, saisie des thèmes par
+# le Présentateur, renommage de soi), et `game:start` combine les deux
+# anciennes préconditions (>=2 joueurs, >=1 thème). Le message
+# `lobby:go_to_themes` / l'action `GO_TO_THEMES` n'existent plus.
 
 
 def add_player(state: GameState, player_id: str, name: str) -> GameState:
@@ -110,7 +117,7 @@ def add_player(state: GameState, player_id: str, name: str) -> GameState:
     name = name.strip()
     if not name:
         raise GameError("invalid_payload", "Le pseudo ne peut pas être vide.")
-    if state.phase != "menu":
+    if state.phase != "lobby":
         raise GameError(
             "invalid_phase", "Impossible de rejoindre une partie déjà lancée."
         )
@@ -121,8 +128,8 @@ def add_player(state: GameState, player_id: str, name: str) -> GameState:
 
 def remove_player(state: GameState, index: int, actor_role: Role) -> GameState:
     _require_role(actor_role, "presentateur")
-    if state.phase != "menu":
-        raise GameError("invalid_phase", "Le lobby joueurs est clos.")
+    if state.phase != "lobby":
+        raise GameError("invalid_phase", "Le lobby est clos.")
     if not (0 <= index < len(state.players)):
         raise GameError("invalid_payload", "Index de joueur invalide.")
     return replace(
@@ -131,18 +138,35 @@ def remove_player(state: GameState, index: int, actor_role: Role) -> GameState:
     )
 
 
-def go_to_themes(state: GameState, actor_role: Role) -> GameState:
-    _require_role(actor_role, "presentateur")
-    if state.phase != "menu":
-        raise GameError("invalid_phase", "Le lobby joueurs est clos.")
-    if len(state.players) < 2:
-        raise GameError("invalid_payload", "Minimum 2 joueurs requis.")
-    return replace(state, phase="themes")
+def rename_player(
+    state: GameState, actor_role: Role, actor_player_id: str, name: str
+) -> GameState:
+    """Un joueur renomme UNIQUEMENT lui-même, possible seulement en lobby.
+
+    Le renommage du Présentateur et de l'Écran principal (qui n'apparaissent
+    jamais dans `state.players`) est géré hors de ce module, directement au
+    niveau de `app.rooms.manager.Room.names` par le handler WS."""
+    _require_role(actor_role, "joueur")
+    if state.phase != "lobby":
+        raise GameError("invalid_phase", "Le renommage n'est possible qu'en lobby.")
+    name = name.strip()
+    if not name:
+        raise GameError("invalid_payload", "Le pseudo ne peut pas être vide.")
+    index = next(
+        (i for i, p in enumerate(state.players) if p.id == actor_player_id), None
+    )
+    if index is None:
+        raise GameError("invalid_payload", "Joueur introuvable dans la partie.")
+    players = tuple(
+        replace(p, name=name) if i == index else p
+        for i, p in enumerate(state.players)
+    )
+    return replace(state, players=players)
 
 
 def add_theme(state: GameState, label: str, actor_role: Role) -> GameState:
     _require_role(actor_role, "presentateur")
-    if state.phase != "themes":
+    if state.phase != "lobby":
         raise GameError("invalid_phase", "La saisie des thèmes est close.")
     label = label.strip()
     if not label:
@@ -152,7 +176,7 @@ def add_theme(state: GameState, label: str, actor_role: Role) -> GameState:
 
 def remove_theme(state: GameState, index: int, actor_role: Role) -> GameState:
     _require_role(actor_role, "presentateur")
-    if state.phase != "themes":
+    if state.phase != "lobby":
         raise GameError("invalid_phase", "La saisie des thèmes est close.")
     if not (0 <= index < len(state.themes)):
         raise GameError("invalid_payload", "Index de thème invalide.")
@@ -166,8 +190,10 @@ def start_game(
     state: GameState, actor_role: Role, rng: random.Random | None = None
 ) -> GameState:
     _require_role(actor_role, "presentateur")
-    if state.phase != "themes":
+    if state.phase != "lobby":
         raise GameError("invalid_phase", "La partie a déjà démarré.")
+    if len(state.players) < 2:
+        raise GameError("invalid_payload", "Minimum 2 joueurs requis.")
     if len(state.themes) < 1:
         raise GameError("invalid_payload", "Minimum 1 thème requis.")
     rng = rng or random
@@ -411,7 +437,7 @@ __all__ = [
     "GameError",
     "add_player",
     "remove_player",
-    "go_to_themes",
+    "rename_player",
     "add_theme",
     "remove_theme",
     "start_game",

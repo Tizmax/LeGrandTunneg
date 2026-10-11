@@ -1,0 +1,246 @@
+import { useState } from 'react'
+import type { GameAction } from '../game/gameReducer'
+import type { GameState } from '../game/types'
+import type { Role } from '../net/types'
+import { ScreenShell } from '../components/ScreenShell'
+import { Button } from '../components/Button'
+import { ArtDecoCorner } from '../components/decor/ArtDecoCorner'
+
+type LobbyScreenProps = {
+  state: GameState
+  dispatch: React.Dispatch<GameAction>
+  role: Role
+  localPlayerId: string | null
+  roomCode: string
+}
+
+/**
+ * Lobby unique (fusion 2026-10-11 des anciens écrans MenuScreen + ThemesScreen,
+ * voir retour utilisateur : "je veux qu'on ait un lobby où tout gérer qui
+ * soit le même lobby où on attend les joueurs, qu'on puisse y changer son
+ * nom, y rentrer les thèmes pour le présentateur, il faudrait aussi qu'on
+ * voie le nom du présentateur").
+ *
+ * - Affiche le code de room + le nom du Présentateur (état `presentateurName`,
+ *   absent de `players` — voir docs/websocket-protocol.md).
+ * - Chacun peut renommer UNIQUEMENT lui-même (joueur ou Présentateur),
+ *   seulement tant que `phase === 'lobby'` (voir app/game/engine.py
+ *   `rename_player` + `app/rooms/manager.py` `rename_participant`).
+ * - La saisie des thèmes (à l'aveugle) reste réservée au Présentateur, mais
+ *   vit désormais sur le même écran que l'attente des joueurs.
+ * - `game:start` requiert >=2 joueurs ET >=1 thème (fusion des deux anciennes
+ *   préconditions de GO_TO_THEMES et START_GAME).
+ */
+export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: LobbyScreenProps) {
+  const isPresenter = role === 'presentateur'
+  const canStart = state.players.length >= 2 && state.themes.length >= 1
+
+  const [editingSelf, setEditingSelf] = useState(false)
+  const [nameDraft, setNameDraft] = useState('')
+  const [themeLabel, setThemeLabel] = useState('')
+
+  const myPlayer = role === 'joueur' ? state.players.find((p) => p.id === localPlayerId) : undefined
+  const myDisplayName = isPresenter ? state.presentateurName : (myPlayer?.name ?? null)
+  const canRenameSelf = isPresenter || Boolean(myPlayer)
+
+  function startEditingSelf() {
+    setNameDraft(myDisplayName ?? '')
+    setEditingSelf(true)
+  }
+
+  function confirmRename() {
+    const trimmed = nameDraft.trim()
+    if (trimmed) dispatch({ type: 'RENAME_SELF', name: trimmed })
+    setEditingSelf(false)
+  }
+
+  function handleAddTheme() {
+    if (!themeLabel.trim()) return
+    dispatch({ type: 'ADD_THEME', label: themeLabel })
+    setThemeLabel('')
+  }
+
+  return (
+    <ScreenShell spotlight smoke>
+      <div className="flex flex-1 flex-col items-center justify-center gap-8 overflow-y-auto py-10">
+        <div className="animate-rise-up text-center">
+          <p className="mb-2 text-xs tracking-[0.5em] text-brass-400/80 uppercase">
+            ★ Ce soir, sur scène ★
+          </p>
+          <h1 className="marquee-text font-display text-5xl font-black tracking-wide sm:text-7xl">
+            Le Grand Tunneg
+          </h1>
+          <p className="mt-3 text-sm tracking-[0.3em] text-[#9a8d7d] uppercase">
+            {isPresenter
+              ? 'Préparez la partie : joueurs et thèmes'
+              : 'En attente du lancement de la partie…'}
+          </p>
+        </div>
+
+        <div className="string-lights animate-rise-up relative w-full max-w-md rounded-2xl border border-brass-600/30 bg-gradient-to-b from-charcoal-800 to-charcoal-900 p-6 shadow-stage-lg">
+          <ArtDecoCorner position="top-left" />
+          <ArtDecoCorner position="top-right" />
+          <ArtDecoCorner position="bottom-left" />
+          <ArtDecoCorner position="bottom-right" />
+
+          {/* Code de room + nom du Présentateur */}
+          <div className="mb-5 flex flex-col items-center gap-1">
+            <span className="text-xs tracking-[0.3em] text-[#9a8d7d] uppercase">
+              Code de la room
+            </span>
+            <span className="font-display text-3xl font-black tracking-[0.3em] text-amber-glow">
+              {roomCode}
+            </span>
+            <span className="mt-2 text-xs tracking-[0.2em] text-[#9a8d7d] uppercase">
+              Présentateur :{' '}
+              <span className="text-[#f1e6d8] normal-case">
+                {state.presentateurName ?? '…'}
+              </span>
+            </span>
+          </div>
+
+          {/* Renommage de soi (Présentateur ou joueur) */}
+          {canRenameSelf && (
+            <div className="mb-5 flex items-center justify-center gap-2 border-b border-white/5 pb-4">
+              {editingSelf ? (
+                <>
+                  <input
+                    type="text"
+                    value={nameDraft}
+                    autoFocus
+                    onChange={(e) => setNameDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') confirmRename()
+                      if (e.key === 'Escape') setEditingSelf(false)
+                    }}
+                    maxLength={24}
+                    className="flex-1 rounded-lg border border-brass-600/30 bg-charcoal-900/80 px-3 py-1.5 text-sm text-[#f1e6d8] outline-none focus:border-amber-glow"
+                  />
+                  <Button variant="primary" className="px-3 py-1.5 text-xs" onClick={confirmRename}>
+                    Valider
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <span className="text-xs tracking-wide text-[#9a8d7d] uppercase">
+                    Vous êtes{' '}
+                    <span className="text-[#f1e6d8] normal-case">{myDisplayName}</span>
+                  </span>
+                  <button
+                    onClick={startEditingSelf}
+                    className="cursor-pointer text-xs tracking-wide text-amber-glow uppercase transition-colors hover:text-amber-ember"
+                  >
+                    Changer mon nom
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Liste des joueurs */}
+          {state.players.length > 0 ? (
+            <ul className="flex flex-col gap-2">
+              {state.players.map((player, i) => (
+                <li
+                  key={player.id}
+                  className="flex items-center justify-between rounded-lg border border-white/5 bg-charcoal-900/60 px-4 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+                >
+                  <span className="font-display text-lg text-[#f1e6d8]">{player.name}</span>
+                  {isPresenter && (
+                    <button
+                      onClick={() => dispatch({ type: 'REMOVE_PLAYER', index: i })}
+                      className="cursor-pointer text-xs tracking-wide text-burgundy-500 uppercase transition-colors hover:text-burgundy-500/70"
+                    >
+                      Retirer
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-center text-xs text-[#7a6f63]">
+              Aucun joueur n'a encore rejoint la room.
+            </p>
+          )}
+
+          {state.players.length < 2 && (
+            <p className="mt-4 text-center text-xs text-[#7a6f63]">
+              Minimum 2 joueurs requis pour lancer la partie.
+            </p>
+          )}
+
+          {/* Saisie des thèmes — Présentateur uniquement, écran de confidentialité pour les autres */}
+          <div className="mt-6 border-t border-white/5 pt-5">
+            <p className="mb-3 text-center text-xs tracking-[0.4em] text-brass-400/80 uppercase">
+              ★ Thèmes secrets ★
+            </p>
+            {isPresenter ? (
+              <>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    value={themeLabel}
+                    onChange={(e) => setThemeLabel(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleAddTheme()
+                    }}
+                    placeholder="Thème secret"
+                    maxLength={30}
+                    className="flex-1 rounded-lg border border-brass-600/30 bg-charcoal-900/80 px-4 py-2.5 text-[#f1e6d8] placeholder-[#6b625b] shadow-[inset_0_2px_6px_rgba(0,0,0,0.4)] outline-none focus:border-amber-glow focus:shadow-[inset_0_2px_6px_rgba(0,0,0,0.4),0_0_0_3px_rgba(232,163,61,0.2)]"
+                  />
+                  <Button variant="primary" onClick={handleAddTheme} disabled={!themeLabel.trim()}>
+                    Ajouter
+                  </Button>
+                </div>
+
+                {state.themes.length > 0 && (
+                  <ul className="mt-5 flex flex-col gap-2">
+                    {state.themes.map((theme, i) => (
+                      <li
+                        key={i}
+                        className="flex items-center justify-between rounded-lg border border-white/5 bg-charcoal-900/60 px-4 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+                      >
+                        <span className="font-display text-lg tracking-[0.3em] text-[#f1e6d8]">
+                          {'●'.repeat(Math.min(theme.label.length, 12))}
+                        </span>
+                        <button
+                          onClick={() => dispatch({ type: 'REMOVE_THEME', index: i })}
+                          className="cursor-pointer text-xs tracking-wide text-burgundy-500 uppercase transition-colors hover:text-burgundy-500/70"
+                        >
+                          Retirer
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {state.themes.length < 1 && (
+                  <p className="mt-4 text-center text-xs text-[#7a6f63]">
+                    Minimum 1 thème requis pour lancer la partie.
+                  </p>
+                )}
+              </>
+            ) : (
+              <div className="flex justify-center gap-2" aria-hidden="true">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-amber-glow" />
+                <span className="h-2 w-2 animate-pulse rounded-full bg-amber-glow [animation-delay:150ms]" />
+                <span className="h-2 w-2 animate-pulse rounded-full bg-amber-glow [animation-delay:300ms]" />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {isPresenter && (
+          <Button
+            variant="gold"
+            className="animate-rise-up px-10 py-3 text-base"
+            disabled={!canStart}
+            onClick={() => dispatch({ type: 'START_GAME' })}
+          >
+            Lancer la partie
+          </Button>
+        )}
+      </div>
+    </ScreenShell>
+  )
+}

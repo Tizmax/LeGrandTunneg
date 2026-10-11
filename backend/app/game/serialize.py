@@ -9,9 +9,15 @@ from typing import Any
 from .types import GameState
 
 
-def serialize_state(state: GameState) -> dict[str, Any]:
+def serialize_state(
+    state: GameState, presentateur_name: str | None = None
+) -> dict[str, Any]:
+    """`presentateur_name` vient de `app.rooms.manager.Room.names` (le
+    Présentateur n'apparaît jamais dans `state.players`, voir
+    docs/websocket-protocol.md) — permet d'afficher son nom côté client."""
     return {
         "phase": state.phase,
+        "presentateurName": presentateur_name,
         "players": [
             {"id": p.id, "name": p.name, "points": p.points} for p in state.players
         ],

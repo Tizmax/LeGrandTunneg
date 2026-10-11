@@ -34,7 +34,6 @@ def two_player_lobby() -> GameState:
 def started_selection_open(seed: int = 0) -> GameState:
     """Lobby -> thèmes -> partie démarrée -> choice ouvert sur la sélection."""
     state = two_player_lobby()
-    state = engine.go_to_themes(state, "presentateur")
     state = engine.add_theme(state, "Cinéma", "presentateur")
     state = engine.start_game(state, "presentateur", rng=random.Random(seed))
     state = engine.reveal_choice(state, "presentateur")
@@ -96,7 +95,6 @@ def test_auto_coffrage_at_square_10_skips_choice_pending() -> None:
     # Deux thèmes pour que la partie ne se termine pas après le coffrage auto
     # du premier (sinon phase passerait à 'end', ce qui est testé ailleurs).
     state = two_player_lobby()
-    state = engine.go_to_themes(state, "presentateur")
     state = engine.add_theme(state, "Cinéma", "presentateur")
     state = engine.add_theme(state, "Musique", "presentateur")
     state = engine.start_game(state, "presentateur", rng=random.Random(0))
@@ -237,7 +235,6 @@ def test_progress_can_be_stolen_by_another_player() -> None:
 
 def test_select_completed_theme_is_rejected() -> None:
     state = two_player_lobby()
-    state = engine.go_to_themes(state, "presentateur")
     state = engine.add_theme(state, "Seul thème", "presentateur")
     state = engine.start_game(state, "presentateur", rng=random.Random(1))
     state = engine.reveal_choice(state, "presentateur")
@@ -258,6 +255,62 @@ def test_select_completed_theme_is_rejected() -> None:
     state = engine.reveal_choice(state, "presentateur")
     with pytest.raises(engine.GameError) as exc_info:
         engine.select_theme(state, 0, "joueur", current_player_id(state))
+    assert exc_info.value.code == "invalid_payload"
+
+
+# --- Renommage en lobby (fusion menu+themes, 2026-10-11) --------------------
+
+
+def test_player_can_rename_self_in_lobby() -> None:
+    state = two_player_lobby()
+    pid = current_player_id(state)
+    state = engine.rename_player(state, "joueur", pid, "Nouveau nom")
+    renamed = next(p for p in state.players if p.id == pid)
+    assert renamed.name == "Nouveau nom"
+    # L'autre joueur n'est pas affecté.
+    other = next(p for p in state.players if p.id != pid)
+    assert other.name != "Nouveau nom"
+
+
+def test_rename_rejected_for_non_joueur_role() -> None:
+    state = two_player_lobby()
+    with pytest.raises(engine.GameError) as exc_info:
+        engine.rename_player(state, "presentateur", "p1", "x")
+    assert exc_info.value.code == "forbidden_role"
+
+
+def test_rename_rejected_outside_lobby() -> None:
+    state = started_selection_open()
+    pid = current_player_id(state)
+    with pytest.raises(engine.GameError) as exc_info:
+        engine.rename_player(state, "joueur", pid, "x")
+    assert exc_info.value.code == "invalid_phase"
+
+
+def test_rename_rejected_for_empty_name() -> None:
+    state = two_player_lobby()
+    pid = current_player_id(state)
+    with pytest.raises(engine.GameError) as exc_info:
+        engine.rename_player(state, "joueur", pid, "   ")
+    assert exc_info.value.code == "invalid_payload"
+
+
+# --- Fusion lobby : game:start requiert désormais joueurs ET thèmes ---------
+
+
+def test_start_game_rejected_without_themes_even_with_enough_players() -> None:
+    state = two_player_lobby()
+    with pytest.raises(engine.GameError) as exc_info:
+        engine.start_game(state, "presentateur")
+    assert exc_info.value.code == "invalid_payload"
+
+
+def test_start_game_rejected_without_enough_players_even_with_themes() -> None:
+    state = GameState()
+    state = engine.add_player(state, "p1", "Alice")
+    state = engine.add_theme(state, "Cinéma", "presentateur")
+    with pytest.raises(engine.GameError) as exc_info:
+        engine.start_game(state, "presentateur")
     assert exc_info.value.code == "invalid_payload"
 
 
@@ -287,7 +340,7 @@ def test_quit_to_menu_wipes_everything() -> None:
     assert state == GameState()
     assert state.players == ()
     assert state.themes == ()
-    assert state.phase == "menu"
+    assert state.phase == "lobby"
 
 
 def test_reset_game_rejected_for_non_presentateur() -> None:
@@ -302,7 +355,6 @@ def test_reset_game_rejected_for_non_presentateur() -> None:
 
 def test_reveal_choice_only_by_presentateur() -> None:
     state = two_player_lobby()
-    state = engine.go_to_themes(state, "presentateur")
     state = engine.add_theme(state, "Thème", "presentateur")
     state = engine.start_game(state, "presentateur", rng=random.Random(0))
     assert state.phase == "selection-pending"
@@ -317,7 +369,6 @@ def test_reveal_choice_only_by_presentateur() -> None:
 
 def test_select_theme_rejected_while_choice_pending() -> None:
     state = two_player_lobby()
-    state = engine.go_to_themes(state, "presentateur")
     state = engine.add_theme(state, "Thème", "presentateur")
     state = engine.start_game(state, "presentateur", rng=random.Random(0))
     assert state.phase == "selection-pending"

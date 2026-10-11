@@ -4,7 +4,10 @@ import { coffrer, createTheme, poursuivre, resetTheme } from './rules'
 export type GameAction =
   | { type: 'ADD_PLAYER'; name: string }
   | { type: 'REMOVE_PLAYER'; index: number }
-  | { type: 'GO_TO_THEMES' }
+  // Fusion lobby 2026-10-11 : chacun renomme UNIQUEMENT lui-même (voir
+  // net/dispatchAdapter.ts et net/useRoomConnection.ts pour le routage
+  // réseau selon le rôle — présentateur/écran n'ont pas d'entrée players).
+  | { type: 'RENAME_SELF'; name: string }
   | { type: 'ADD_THEME'; label: string }
   | { type: 'REMOVE_THEME'; index: number }
   | { type: 'START_GAME' }
@@ -26,7 +29,8 @@ export type GameAction =
   | { type: 'REVEAL_CHOICE' }
 
 export const initialState: GameState = {
-  phase: 'menu',
+  phase: 'lobby',
+  presentateurName: null,
   players: [],
   themes: [],
   currentPlayerIndex: 0,
@@ -71,9 +75,11 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       }
     }
 
-    case 'GO_TO_THEMES': {
-      if (state.players.length < 2) return state
-      return { ...state, phase: 'themes' }
+    case 'RENAME_SELF': {
+      // Reducer local (styleguide/solo) : pas de notion de "self" distincte,
+      // ce cas n'est pas exercé en pratique hors du mode réseau — voir
+      // net/dispatchAdapter.ts pour le vrai routage par rôle.
+      return state
     }
 
     case 'ADD_THEME': {
@@ -90,7 +96,9 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
     }
 
     case 'START_GAME': {
-      if (state.themes.length < 1) return state
+      // Fusion lobby 2026-10-11 : les deux préconditions (joueurs + thèmes)
+      // sont vérifiées ici puisqu'il n'y a plus d'étape GO_TO_THEMES séparée.
+      if (state.players.length < 2 || state.themes.length < 1) return state
       const startIndex = Math.floor(Math.random() * state.players.length)
       return {
         ...state,

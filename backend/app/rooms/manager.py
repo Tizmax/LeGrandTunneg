@@ -61,6 +61,12 @@ class Room:
     def role_of(self, local_player_id: str) -> engine.Role | None:
         return self.roles.get(local_player_id)
 
+    @property
+    def presentateur_name(self) -> str | None:
+        if self.presentateur_id is None:
+            return None
+        return self.names.get(self.presentateur_id)
+
 
 class RoomManager:
     def __init__(self) -> None:
@@ -132,6 +138,27 @@ class RoomManager:
     def close_room(self, code: str) -> None:
         self._rooms.pop(code, None)
 
+    def rename_participant(
+        self, code: str, local_player_id: str, name: str
+    ) -> Room:
+        """Renomme le Présentateur ou l'Écran principal (jamais dans
+        `state.players`, donc hors du moteur de règles `app.game.engine`).
+
+        Le renommage d'un `joueur` passe par `engine.rename_player` (il doit
+        muter `state.players`, voir le handler WS dédié) — cette méthode ne
+        gère QUE les deux rôles qui vivent uniquement dans `Room.names`.
+        Possible uniquement en lobby, comme pour le renommage joueur."""
+        room = self.get_room(code)
+        if local_player_id not in room.roles:
+            raise UnknownParticipantError(local_player_id)
+        if room.state.phase != "lobby":
+            raise ValueError("Le renommage n'est possible qu'en lobby.")
+        name = name.strip()
+        if not name:
+            raise ValueError("Le pseudo ne peut pas être vide.")
+        room.names[local_player_id] = name
+        return room
+
     def attach_connection(
         self, code: str, local_player_id: str, websocket: "WebSocket"
     ) -> Room:
@@ -161,6 +188,7 @@ class RoomManager:
         if room is None:
             return
         stale: list[str] = []
+        presentateur_name = room.presentateur_name
         for local_player_id, conn in list(room.connections.items()):
             role = room.roles.get(local_player_id)
             if role is None:
@@ -173,7 +201,7 @@ class RoomManager:
                             "code": code,
                             "role": role,
                             "localPlayerId": local_player_id,
-                            "state": serialize_state(room.state),
+                            "state": serialize_state(room.state, presentateur_name),
                         },
                     }
                 )

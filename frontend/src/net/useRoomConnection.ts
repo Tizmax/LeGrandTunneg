@@ -33,7 +33,7 @@ export type OutgoingMessage =
   | { type: 'theme:add'; payload: { label: string } }
   | { type: 'theme:remove'; payload: { index: number } }
   | { type: 'player:remove'; payload: { index: number } }
-  | { type: 'lobby:go_to_themes'; payload: Record<string, never> }
+  | { type: 'player:rename'; payload: { name: string } }
   | { type: 'game:start'; payload: Record<string, never> }
   | { type: 'choice:reveal'; payload: Record<string, never> }
   | { type: 'theme:select'; payload: { index: number } }

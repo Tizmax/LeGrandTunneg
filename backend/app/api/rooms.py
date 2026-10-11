@@ -81,7 +81,7 @@ async def join_room(code: str, body: JoinRoomRequest) -> JoinRoomResponse:
         code=room.code,
         localPlayerId=local_player_id,
         role=role,
-        state=serialize_state(room.state),
+        state=serialize_state(room.state, room.presentateur_name),
     )
 
 

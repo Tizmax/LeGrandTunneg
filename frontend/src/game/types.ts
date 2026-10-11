@@ -17,8 +17,9 @@ export type Player = {
 }
 
 export type GamePhase =
-  | 'menu' // player entry
-  | 'themes' // theme entry (blind)
+  // Fusion 2026-10-11 : lobby unique (attente joueurs + saisie thèmes +
+  // renommage de soi), remplace les anciennes phases 'menu'/'themes'.
+  | 'lobby'
   | 'selection-pending' // choice_pending : le choix de thème est éligible mais pas encore révélé par le Présentateur
   | 'selection' // choice_open : la grille de sélection du thème est révélée, visible/cliquable
   | 'tunnel' // in-game tunnel for a theme
@@ -40,6 +41,9 @@ export type HistoryEntry = {
 
 export type GameState = {
   phase: GamePhase
+  // Nom d'affichage du Présentateur (n'apparaît jamais dans `players`, voir
+  // docs/websocket-protocol.md) — null en mode styleguide/debug sans réseau.
+  presentateurName: string | null
   players: Player[]
   themes: Theme[]
   currentPlayerIndex: number

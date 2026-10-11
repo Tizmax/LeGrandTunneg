@@ -13,8 +13,7 @@ from typing import Literal
 SquareColor = Literal["black", "gray", "green", "yellow", "empty"]
 
 GamePhase = Literal[
-    "menu",  # saisie des joueurs
-    "themes",  # saisie des thèmes (à l'aveugle)
+    "lobby",  # attente des joueurs + saisie des thèmes (écran unique, fusion 2026-10-11)
     "selection-pending",  # choice_pending : choix de thème éligible, pas encore révélé
     "selection",  # choice_open : grille de sélection révélée, cliquable
     "tunnel",  # tunnel de jeu en cours pour un thème
@@ -57,7 +56,7 @@ class HistoryEntry:
 
 @dataclass(frozen=True)
 class GameState:
-    phase: GamePhase = "menu"
+    phase: GamePhase = "lobby"
     players: tuple[Player, ...] = field(default_factory=tuple)
     themes: tuple[Theme, ...] = field(default_factory=tuple)
     current_player_index: int = 0

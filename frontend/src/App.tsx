@@ -10,8 +10,7 @@ import {
 } from './net/useRoomConnection'
 import { createNetworkDispatch } from './net/dispatchAdapter'
 import { AccueilScreen } from './screens/AccueilScreen'
-import { MenuScreen } from './screens/MenuScreen'
-import { ThemesScreen } from './screens/ThemesScreen'
+import { LobbyScreen } from './screens/LobbyScreen'
 import { SelectionScreen } from './screens/SelectionScreen'
 import { TunnelScreen } from './screens/TunnelScreen'
 import { EndScreen } from './screens/EndScreen'
@@ -27,10 +26,16 @@ function renderScreen(
   roomCode: string,
 ) {
   switch (phase) {
-    case 'menu':
-      return <MenuScreen state={state} dispatch={dispatch} role={role} roomCode={roomCode} />
-    case 'themes':
-      return <ThemesScreen state={state} dispatch={dispatch} role={role} />
+    case 'lobby':
+      return (
+        <LobbyScreen
+          state={state}
+          dispatch={dispatch}
+          role={role}
+          localPlayerId={localPlayerId}
+          roomCode={roomCode}
+        />
+      )
     // Couche show : choix de thème pas encore révélé par le Présentateur.
     // Contrairement à Continuer/Coffrer, la grille de thèmes reste visible
     // (juste non cliquable) — c'est SelectionScreen qui gère les deux
@@ -46,7 +51,15 @@ function renderScreen(
     case 'end':
       return <EndScreen state={state} dispatch={dispatch} role={role} />
     default:
-      return <MenuScreen state={state} dispatch={dispatch} role={role} roomCode={roomCode} />
+      return (
+        <LobbyScreen
+          state={state}
+          dispatch={dispatch}
+          role={role}
+          localPlayerId={localPlayerId}
+          roomCode={roomCode}
+        />
+      )
   }
 }
 

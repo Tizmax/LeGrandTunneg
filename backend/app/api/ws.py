@@ -29,7 +29,12 @@ async def _send_error(websocket: WebSocket, code: str, message: str) -> None:
 
 
 async def _send_state_sync(
-    websocket: WebSocket, code: str, role: str, local_player_id: str, state: GameState
+    websocket: WebSocket,
+    code: str,
+    role: str,
+    local_player_id: str,
+    state: GameState,
+    presentateur_name: str | None,
 ) -> None:
     await websocket.send_json(
         {
@@ -38,7 +43,7 @@ async def _send_state_sync(
                 "code": code,
                 "role": role,
                 "localPlayerId": local_player_id,
-                "state": serialize_state(state),
+                "state": serialize_state(state, presentateur_name),
             },
         }
     )
@@ -79,10 +84,6 @@ def _h_theme_remove(state: GameState, payload: dict, role: str, pid: str) -> Gam
 
 def _h_player_remove(state: GameState, payload: dict, role: str, pid: str) -> GameState:
     return engine.remove_player(state, _require_int(payload, "index"), role)
-
-
-def _h_go_to_themes(state: GameState, payload: dict, role: str, pid: str) -> GameState:
-    return engine.go_to_themes(state, role)
 
 
 def _h_game_start(state: GameState, payload: dict, role: str, pid: str) -> GameState:
@@ -136,8 +137,10 @@ _HANDLERS: dict[str, Callable[[GameState, dict, str, str], GameState]] = {
     "theme:add": _h_theme_add,
     "theme:remove": _h_theme_remove,
     "player:remove": _h_player_remove,
-    "lobby:go_to_themes": _h_go_to_themes,
     "game:start": _h_game_start,
+    # "player:rename" est traité à part : un Présentateur/Écran principal
+    # n'a pas d'entrée dans GameState.players (voir app/rooms/manager.py),
+    # son nom d'affichage vit uniquement dans Room.names.
     "choice:reveal": _h_choice_reveal,
     "theme:select": _h_theme_select,
     "timer:start": _h_timer_start,
@@ -166,7 +169,9 @@ async def websocket_endpoint(websocket: WebSocket, code: str, local_player_id: s
 
     await websocket.accept()
     role = room.roles[local_player_id]
-    await _send_state_sync(websocket, code, role, local_player_id, room.state)
+    await _send_state_sync(
+        websocket, code, role, local_player_id, room.state, room.presentateur_name
+    )
 
     try:
         while True:
@@ -184,6 +189,25 @@ async def websocket_endpoint(websocket: WebSocket, code: str, local_player_id: s
                     await _broadcast_closed(code)
                     room_manager.close_room(code)
                 return
+
+            if msg_type == "player:rename":
+                name = payload.get("name", "")
+                async with room.lock:
+                    try:
+                        if role == "joueur":
+                            room.state = engine.rename_player(
+                                room.state, role, local_player_id, name
+                            )
+                        else:
+                            room_manager.rename_participant(code, local_player_id, name)
+                    except engine.GameError as exc:
+                        await _send_error(websocket, exc.code, exc.message)
+                        continue
+                    except (ValueError, UnknownParticipantError) as exc:
+                        await _send_error(websocket, "invalid_payload", str(exc))
+                        continue
+                    await _broadcast_state(code)
+                continue
 
             handler = _HANDLERS.get(msg_type)
             if handler is None:

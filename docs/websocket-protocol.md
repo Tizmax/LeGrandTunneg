@@ -5,12 +5,23 @@ created: 2026-10-11
 
 # Protocole WebSocket — mode room multi (Bloc 3)
 
-**Mise à jour 2026-10-11** : ajout du sous-état `question-pending` entre la
-sélection du thème (ou "Continuer") et le lancement effectif du chrono. Le
-Présentateur pose désormais sa question à l'oral avant de déclencher
-manuellement le minuteur via `timer:start` — voir table des messages et la
-spécification figée dans l'exec-plan pour le détail des deux temps côté
-joueur ("écoute la question" puis "attend le verdict").
+**Mise à jour 2026-10-11 (chrono)** : ajout du sous-état `question-pending`
+entre la sélection du thème (ou "Continuer") et le lancement effectif du
+chrono. Le Présentateur pose désormais sa question à l'oral avant de
+déclencher manuellement le minuteur via `timer:start` — voir table des
+messages et la spécification figée dans l'exec-plan pour le détail des deux
+temps côté joueur ("écoute la question" puis "attend le verdict").
+
+**Mise à jour 2026-10-11 (lobby unique)** : fusion des anciennes phases
+`menu` (attente joueurs) et `themes` (saisie des thèmes) en une seule phase
+`lobby` — un seul écran affiche simultanément la liste des joueurs, la
+saisie des thèmes par le Présentateur, et permet à chaque participant
+(Présentateur, Joueur, Écran principal) de renommer UNIQUEMENT lui-même via
+`player:rename`. Le message `lobby:go_to_themes` est supprimé ; `game:start`
+vérifie désormais les deux préconditions (`players.length >= 2` ET
+`themes.length >= 1`) en une seule fois. Le nom du Présentateur est exposé
+au client via le nouveau champ `presentateurName` du DTO `GameState`
+(il n'apparaît jamais dans `players`).
 
 Portée de cette version : **état de room et de partie entièrement en mémoire
 process-local** (pas de Postgres branché). La persistance (Bloc 2) et la
@@ -28,7 +39,7 @@ toujours.
    (`role` ∈ `"joueur"` (défaut) | `"ecran-principal"`). Réponse :
    `{code, localPlayerId, role}`.
    - Rejoindre en tant que `joueur` n'est accepté que tant que la partie est
-     en lobby (`phase === "menu"`) : ajoute immédiatement une entrée dans
+     en lobby (`phase === "lobby"`) : ajoute immédiatement une entrée dans
      `players` via le moteur de règles.
    - Rejoindre en tant que `ecran-principal` est accepté à tout moment ; ce
      rôle n'est jamais ajouté à `players` (lecture seule, aucune action de
@@ -98,7 +109,7 @@ type Player = {
 }
 
 type GamePhase =
-  | 'menu' | 'themes' | 'selection-pending' | 'selection' | 'tunnel' | 'end'
+  | 'lobby' | 'selection-pending' | 'selection' | 'tunnel' | 'end'
 
 type TunnelSubPhase =
   | 'question-pending' | 'question' | 'after-success-pending' | 'after-success-open' | null
@@ -107,6 +118,9 @@ type HistoryEntry = { themeLabel: string; playerName: string; pointsGained: numb
 
 type GameState = {
   phase: GamePhase
+  // Nom d'affichage du Présentateur (n'apparaît jamais dans `players`) —
+  // ajouté 2026-10-11 pour que tous les participants voient qui présente.
+  presentateurName: string | null
   players: Player[]
   themes: Theme[]
   currentPlayerIndex: number
@@ -120,11 +134,11 @@ type GameState = {
 
 | Type              | Payload                | Rôle autorisé                                  | Précondition d'état serveur                                             | Action moteur équivalente (gameReducer.ts) |
 |-------------------|-------------------------|-------------------------------------------------|---------------------------------------------------------------------------|----------------------------------------------|
-| `theme:add`       | `{ label }`             | Présentateur                                    | `phase === 'themes'`                                                      | `ADD_THEME`                                  |
-| `theme:remove`    | `{ index }`             | Présentateur                                    | `phase === 'themes'`                                                      | `REMOVE_THEME`                               |
-| `player:remove`   | `{ index }`             | Présentateur                                    | `phase === 'menu'`                                                        | `REMOVE_PLAYER`                              |
-| `lobby:go_to_themes` | `{}`                 | Présentateur                                    | `phase === 'menu'`, `players.length >= 2`                                 | `GO_TO_THEMES`                               |
-| `game:start`      | `{}`                    | Présentateur                                    | `phase === 'themes'`, `themes.length >= 1`                                | `START_GAME`                                 |
+| `theme:add`       | `{ label }`             | Présentateur                                    | `phase === 'lobby'`                                                       | `ADD_THEME`                                  |
+| `theme:remove`    | `{ index }`             | Présentateur                                    | `phase === 'lobby'`                                                       | `REMOVE_THEME`                               |
+| `player:remove`   | `{ index }`             | Présentateur                                    | `phase === 'lobby'`                                                       | `REMOVE_PLAYER`                              |
+| `player:rename`   | `{ name }`              | **N'importe quel rôle, sur lui-même uniquement** | `phase === 'lobby'`                                                       | `RENAME_SELF`                                |
+| `game:start`      | `{}`                    | Présentateur                                    | `phase === 'lobby'`, `players.length >= 2`, `themes.length >= 1`          | `START_GAME`                                 |
 | `choice:reveal`   | `{}`                    | Présentateur                                    | `phase === 'selection-pending'` OU `tunnelSubPhase === 'after-success-pending'` | `REVEAL_CHOICE`                         |
 | `theme:select`    | `{ index }`             | **Joueur concerné** (`players[currentPlayerIndex].id`) | `phase === 'selection'` (choice_open), thème visé non `completed`    | `SELECT_THEME`                               |
 | `timer:start`     | `{}`                    | Présentateur                                    | `phase === 'tunnel'`, `tunnelSubPhase === 'question-pending'`              | *(nouveau — pas d'équivalent POC)*           |
