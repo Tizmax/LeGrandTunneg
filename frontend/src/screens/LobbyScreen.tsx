@@ -77,9 +77,9 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
           </p>
         </div>
 
-        <div className="flex w-full max-w-4xl flex-col items-center gap-6 lg:flex-row lg:items-start lg:justify-center">
+        <div className="flex w-full max-w-md flex-col items-center gap-6">
           {/* Carte principale : code de room, présentateur, renommage, joueurs */}
-          <div className="string-lights animate-rise-up relative w-full max-w-md rounded-2xl border border-brass-600/30 bg-gradient-to-b from-charcoal-800 to-charcoal-900 p-6 shadow-stage-lg">
+          <div className="string-lights animate-rise-up relative w-full rounded-2xl border border-brass-600/30 bg-gradient-to-b from-charcoal-800 to-charcoal-900 p-6 shadow-stage-lg">
             <ArtDecoCorner position="top-left" />
             <ArtDecoCorner position="top-right" />
             <ArtDecoCorner position="bottom-left" />
@@ -172,33 +172,33 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
             )}
           </div>
 
-          {/* Panneau latéral des thèmes — visible UNIQUEMENT par le Présentateur.
-              Totalement invisible pour les autres rôles (plus de pastilles
-              d'attente) : les thèmes n'ont aucune raison d'être évoqués côté
-              joueur/écran avant le lancement. Liste à hauteur limitée avec
-              défilement interne pour ne jamais faire défiler toute la page. */}
-          {isPresenter && (
-            <div className="animate-rise-up relative w-full max-w-xs rounded-2xl border border-brass-600/30 bg-gradient-to-b from-charcoal-800 to-charcoal-900 p-6 shadow-stage-lg">
-              <p className="mb-3 text-center text-xs tracking-[0.4em] text-brass-400/80 uppercase">
-                ★ Thèmes ★
-              </p>
+        </div>
 
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={themeLabel}
-                  onChange={(e) => setThemeLabel(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleAddTheme()
-                  }}
-                  placeholder="Nouveau thème"
-                  maxLength={30}
-                  className="flex-1 rounded-lg border border-brass-600/30 bg-charcoal-900/80 px-4 py-2.5 text-[#f1e6d8] placeholder-[#6b625b] shadow-[inset_0_2px_6px_rgba(0,0,0,0.4)] outline-none focus:border-amber-glow focus:shadow-[inset_0_2px_6px_rgba(0,0,0,0.4),0_0_0_3px_rgba(232,163,61,0.2)]"
-                />
-                <Button variant="primary" onClick={handleAddTheme} disabled={!themeLabel.trim()}>
-                  Ajouter
-                </Button>
-              </div>
+        {/* Panneau des thèmes — visible UNIQUEMENT par le Présentateur.
+            Sur grand écran : fixé à droite pour laisser la carte principale centrée.
+            Sur mobile : dans le flux normal sous la carte principale. */}
+        {isPresenter && (
+          <div className="animate-rise-up lg:fixed lg:right-4 lg:top-1/2 lg:-translate-y-1/2 w-full max-w-md lg:w-64 lg:max-w-none rounded-2xl border border-brass-600/30 bg-gradient-to-b from-charcoal-800 to-charcoal-900 p-5 shadow-stage-lg">
+            <p className="mb-3 text-center text-xs tracking-[0.4em] text-brass-400/80 uppercase">
+              ★ Thèmes ★
+            </p>
+
+            <div className="flex flex-col gap-2">
+              <input
+                type="text"
+                value={themeLabel}
+                onChange={(e) => setThemeLabel(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleAddTheme()
+                }}
+                placeholder="Nouveau thème"
+                maxLength={30}
+                className="w-full rounded-lg border border-brass-600/30 bg-charcoal-900/80 px-3 py-2 text-sm text-[#f1e6d8] placeholder-[#6b625b] shadow-[inset_0_2px_6px_rgba(0,0,0,0.4)] outline-none focus:border-amber-glow focus:shadow-[inset_0_2px_6px_rgba(0,0,0,0.4),0_0_0_3px_rgba(232,163,61,0.2)]"
+              />
+              <Button variant="primary" className="w-full" onClick={handleAddTheme} disabled={!themeLabel.trim()}>
+                Ajouter
+              </Button>
+            </div>
 
               {state.themes.length > 0 && (
                 <ul className="mt-5 flex max-h-64 flex-col gap-2 overflow-y-auto pr-1">
@@ -219,14 +219,13 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
                 </ul>
               )}
 
-              {state.themes.length < 1 && (
-                <p className="mt-4 text-center text-xs text-[#7a6f63]">
-                  Minimum 1 thème requis pour lancer la partie.
-                </p>
-              )}
-            </div>
-          )}
-        </div>
+            {state.themes.length < 1 && (
+              <p className="mt-4 text-center text-xs text-[#7a6f63]">
+                Minimum 1 thème requis pour lancer la partie.
+              </p>
+            )}
+          </div>
+        )}
 
         {isPresenter && (
           <Button

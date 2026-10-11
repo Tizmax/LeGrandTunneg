@@ -48,7 +48,7 @@ export function Tunnel({ theme }: TunnelProps) {
           const color = squareColor(theme, k)
           const isSeparator = k === 3 || k === 6 || k === 9
           return (
-            <div key={k} className="flex items-center">
+            <div key={k} className="flex items-end">
               <div className="flex flex-col items-center">
                 <div
                   className={`flex h-20 w-12 flex-col items-center justify-end rounded-md border-2 pb-1.5 text-base font-bold transition-all duration-500 sm:h-32 sm:w-20 sm:text-xl ${squareFullClasses[color]} ${ignited[k] ? 'animate-square-ignite' : ''}`}
