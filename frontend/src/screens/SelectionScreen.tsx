@@ -1,6 +1,6 @@
 import type { GameAction } from '../game/gameReducer'
 import type { GameState } from '../game/types'
-import type { ViewRole } from '../viewRole'
+import type { Role } from '../net/types'
 import { ScreenShell } from '../components/ScreenShell'
 import { Button } from '../components/Button'
 import { ScoreBoard } from '../components/ScoreBoard'
@@ -10,21 +10,25 @@ import { ArtDecoCorner } from '../components/decor/ArtDecoCorner'
 type SelectionScreenProps = {
   state: GameState
   dispatch: React.Dispatch<GameAction>
-  role: ViewRole
+  role: Role
+  localPlayerId: string | null
 }
 
 /**
- * Choix du thème (choice_open) : la sélection appartient au Joueur, pas au
- * Présentateur. Les 3 vues partagent cette grille mais avec des capacités
- * différentes :
- * - Joueur : grille cliquable (c'est son choix).
+ * Choix du thème (choice_open) : la sélection appartient au Joueur dont
+ * c'est le tour, pas au Présentateur ni aux autres joueurs. Les 3 vues
+ * partagent cette grille mais avec des capacités différentes :
+ * - Joueur concerné (players[currentPlayerIndex].id === localPlayerId) :
+ *   grille cliquable (c'est son choix) — tout autre joueur la voit en
+ *   lecture seule, le serveur rejetterait de toute façon avec
+ *   `not_your_turn` (voir docs/websocket-protocol.md).
  * - Présentateur : grille en lecture seule + vue d'ensemble room + actions
  *   réservées (Réinitialiser/Retour menu).
  * - Écran principal : grille en lecture seule, aucun contrôle.
  */
-export function SelectionScreen({ state, dispatch, role }: SelectionScreenProps) {
+export function SelectionScreen({ state, dispatch, role, localPlayerId }: SelectionScreenProps) {
   const currentPlayer = state.players[state.currentPlayerIndex]
-  const isInteractive = role === 'joueur'
+  const isInteractive = role === 'joueur' && currentPlayer?.id === localPlayerId
 
   return (
     <ScreenShell>

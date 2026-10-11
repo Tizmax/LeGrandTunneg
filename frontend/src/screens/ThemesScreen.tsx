@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { GameAction } from '../game/gameReducer'
 import type { GameState } from '../game/types'
+import type { Role } from '../net/types'
 import { ScreenShell } from '../components/ScreenShell'
 import { Button } from '../components/Button'
 import { ArtDecoCorner } from '../components/decor/ArtDecoCorner'
@@ -8,10 +9,19 @@ import { ArtDecoCorner } from '../components/decor/ArtDecoCorner'
 type ThemesScreenProps = {
   state: GameState
   dispatch: React.Dispatch<GameAction>
+  role: Role
 }
 
-export function ThemesScreen({ state, dispatch }: ThemesScreenProps) {
+/**
+ * Saisie des thèmes (Bloc 7) : réservée au Présentateur (seul rôle autorisé
+ * par le serveur à émettre theme:add/theme:remove/game:start — voir
+ * docs/websocket-protocol.md). Les autres rôles voient un écran d'attente
+ * neutre sans accès à la saisie, afin de ne pas révéler les thèmes en cours
+ * de frappe sur un autre device.
+ */
+export function ThemesScreen({ state, dispatch, role }: ThemesScreenProps) {
   const [label, setLabel] = useState('')
+  const isPresenter = role === 'presentateur'
 
   function handleAdd() {
     if (!label.trim()) return
@@ -32,68 +42,80 @@ export function ThemesScreen({ state, dispatch }: ThemesScreenProps) {
             Les thèmes secrets
           </h1>
           <p className="mt-3 text-sm tracking-[0.3em] text-[#9a8d7d] uppercase">
-            Saisie à l'aveugle — personne ne doit voir l'écran
+            {isPresenter
+              ? "Saisie à l'aveugle — personne ne doit voir l'écran"
+              : 'Le Présentateur prépare les thèmes…'}
           </p>
         </div>
 
-        <div className="string-lights animate-rise-up relative w-full max-w-md rounded-2xl border border-brass-600/30 bg-gradient-to-b from-charcoal-800 to-charcoal-900 p-6 shadow-stage-lg">
-          <ArtDecoCorner position="top-left" />
-          <ArtDecoCorner position="top-right" />
-          <ArtDecoCorner position="bottom-left" />
-          <ArtDecoCorner position="bottom-right" />
-          <div className="flex gap-2">
-            <input
-              type="password"
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleAdd()
-              }}
-              placeholder="Thème secret"
-              maxLength={30}
-              className="flex-1 rounded-lg border border-brass-600/30 bg-charcoal-900/80 px-4 py-2.5 text-[#f1e6d8] placeholder-[#6b625b] shadow-[inset_0_2px_6px_rgba(0,0,0,0.4)] outline-none focus:border-amber-glow focus:shadow-[inset_0_2px_6px_rgba(0,0,0,0.4),0_0_0_3px_rgba(232,163,61,0.2)]"
-            />
-            <Button variant="primary" onClick={handleAdd} disabled={!label.trim()}>
-              Ajouter
+        {isPresenter ? (
+          <>
+            <div className="string-lights animate-rise-up relative w-full max-w-md rounded-2xl border border-brass-600/30 bg-gradient-to-b from-charcoal-800 to-charcoal-900 p-6 shadow-stage-lg">
+              <ArtDecoCorner position="top-left" />
+              <ArtDecoCorner position="top-right" />
+              <ArtDecoCorner position="bottom-left" />
+              <ArtDecoCorner position="bottom-right" />
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  value={label}
+                  onChange={(e) => setLabel(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleAdd()
+                  }}
+                  placeholder="Thème secret"
+                  maxLength={30}
+                  className="flex-1 rounded-lg border border-brass-600/30 bg-charcoal-900/80 px-4 py-2.5 text-[#f1e6d8] placeholder-[#6b625b] shadow-[inset_0_2px_6px_rgba(0,0,0,0.4)] outline-none focus:border-amber-glow focus:shadow-[inset_0_2px_6px_rgba(0,0,0,0.4),0_0_0_3px_rgba(232,163,61,0.2)]"
+                />
+                <Button variant="primary" onClick={handleAdd} disabled={!label.trim()}>
+                  Ajouter
+                </Button>
+              </div>
+
+              {state.themes.length > 0 && (
+                <ul className="mt-5 flex flex-col gap-2">
+                  {state.themes.map((theme, i) => (
+                    <li
+                      key={i}
+                      className="flex items-center justify-between rounded-lg border border-white/5 bg-charcoal-900/60 px-4 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+                    >
+                      <span className="font-display text-lg tracking-[0.3em] text-[#f1e6d8]">
+                        {'●'.repeat(Math.min(theme.label.length, 12))}
+                      </span>
+                      <button
+                        onClick={() => dispatch({ type: 'REMOVE_THEME', index: i })}
+                        className="cursor-pointer text-xs tracking-wide text-burgundy-500 uppercase transition-colors hover:text-burgundy-500/70"
+                      >
+                        Retirer
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {state.themes.length < 1 && (
+                <p className="mt-4 text-center text-xs text-[#7a6f63]">
+                  Minimum 1 thème requis pour lancer la partie.
+                </p>
+              )}
+            </div>
+
+            <Button
+              variant="gold"
+              className="animate-rise-up px-10 py-3 text-base"
+              disabled={!canStart}
+              onClick={() => dispatch({ type: 'START_GAME' })}
+            >
+              Lancer la partie
             </Button>
+          </>
+        ) : (
+          <div className="animate-rise-up flex gap-2" aria-hidden="true">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-amber-glow" />
+            <span className="h-2 w-2 animate-pulse rounded-full bg-amber-glow [animation-delay:150ms]" />
+            <span className="h-2 w-2 animate-pulse rounded-full bg-amber-glow [animation-delay:300ms]" />
           </div>
-
-          {state.themes.length > 0 && (
-            <ul className="mt-5 flex flex-col gap-2">
-              {state.themes.map((theme, i) => (
-                <li
-                  key={i}
-                  className="flex items-center justify-between rounded-lg border border-white/5 bg-charcoal-900/60 px-4 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
-                >
-                  <span className="font-display text-lg tracking-[0.3em] text-[#f1e6d8]">
-                    {'●'.repeat(Math.min(theme.label.length, 12))}
-                  </span>
-                  <button
-                    onClick={() => dispatch({ type: 'REMOVE_THEME', index: i })}
-                    className="cursor-pointer text-xs tracking-wide text-burgundy-500 uppercase transition-colors hover:text-burgundy-500/70"
-                  >
-                    Retirer
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {state.themes.length < 1 && (
-            <p className="mt-4 text-center text-xs text-[#7a6f63]">
-              Minimum 1 thème requis pour lancer la partie.
-            </p>
-          )}
-        </div>
-
-        <Button
-          variant="gold"
-          className="animate-rise-up px-10 py-3 text-base"
-          disabled={!canStart}
-          onClick={() => dispatch({ type: 'START_GAME' })}
-        >
-          Lancer la partie
-        </Button>
+        )}
       </div>
     </ScreenShell>
   )

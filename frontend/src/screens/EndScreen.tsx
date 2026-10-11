@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion'
 import type { GameAction } from '../game/gameReducer'
 import type { GameState } from '../game/types'
+import type { Role } from '../net/types'
 import { ScreenShell } from '../components/ScreenShell'
 import { Button } from '../components/Button'
 import { ArtDecoCorner } from '../components/decor/ArtDecoCorner'
@@ -8,6 +9,7 @@ import { ArtDecoCorner } from '../components/decor/ArtDecoCorner'
 type EndScreenProps = {
   state: GameState
   dispatch: React.Dispatch<GameAction>
+  role: Role
 }
 
 const PODIUM_HEIGHTS = ['h-36', 'h-28', 'h-20'] as const
@@ -25,7 +27,7 @@ function biggestSingleCoffrage(state: GameState) {
   )
 }
 
-export function EndScreen({ state, dispatch }: EndScreenProps) {
+export function EndScreen({ state, dispatch, role }: EndScreenProps) {
   const ranked = [...state.players].sort((a, b) => b.points - a.points)
   const podium = ranked.slice(0, 3)
   // Reorder visually: 2nd, 1st, 3rd for classic podium look
@@ -101,14 +103,18 @@ export function EndScreen({ state, dispatch }: EndScreenProps) {
           </div>
         )}
 
-        <div className="animate-rise-up flex gap-4">
-          <Button variant="secondary" onClick={() => dispatch({ type: 'RESET_GAME' })}>
-            Rejouer
-          </Button>
-          <Button variant="ghost" onClick={() => dispatch({ type: 'QUIT_TO_MENU' })}>
-            Retour au menu
-          </Button>
-        </div>
+        {/* Rejouer / Retour au menu : réservés au Présentateur (le serveur
+            rejetterait de toute façon avec `forbidden_role` sinon). */}
+        {role === 'presentateur' && (
+          <div className="animate-rise-up flex gap-4">
+            <Button variant="secondary" onClick={() => dispatch({ type: 'RESET_GAME' })}>
+              Rejouer
+            </Button>
+            <Button variant="ghost" onClick={() => dispatch({ type: 'QUIT_TO_MENU' })}>
+              Retour au menu
+            </Button>
+          </div>
+        )}
       </div>
     </ScreenShell>
   )

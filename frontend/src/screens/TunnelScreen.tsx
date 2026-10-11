@@ -1,6 +1,6 @@
 import type { GameAction } from '../game/gameReducer'
 import type { GameState } from '../game/types'
-import type { ViewRole } from '../viewRole'
+import type { Role } from '../net/types'
 import { ScreenShell } from '../components/ScreenShell'
 import { Button } from '../components/Button'
 import { ScoreBoard } from '../components/ScoreBoard'
@@ -13,10 +13,11 @@ import { ChoicePendingScreen } from './ChoicePendingScreen'
 type TunnelScreenProps = {
   state: GameState
   dispatch: React.Dispatch<GameAction>
-  role: ViewRole
+  role: Role
+  localPlayerId: string | null
 }
 
-export function TunnelScreen({ state, dispatch, role }: TunnelScreenProps) {
+export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScreenProps) {
   const theme = state.activeThemeIndex !== null ? state.themes[state.activeThemeIndex] : null
   const currentPlayer = state.players[state.currentPlayerIndex]
 
@@ -31,7 +32,10 @@ export function TunnelScreen({ state, dispatch, role }: TunnelScreenProps) {
   }
 
   const isPresenter = role === 'presentateur'
-  const isPlayer = role === 'joueur'
+  // Seul le joueur dont c'est le tour peut voir Continuer/Coffrer — un autre
+  // joueur ne reçoit que le message d'attente ci-dessous (le serveur
+  // rejetterait de toute façon avec `not_your_turn`).
+  const isCurrentPlayer = role === 'joueur' && currentPlayer?.id === localPlayerId
 
   return (
     <ScreenShell spotlight smoke>
@@ -76,15 +80,16 @@ export function TunnelScreen({ state, dispatch, role }: TunnelScreenProps) {
               </>
             )}
 
-            {isPlayer && state.tunnelSubPhase === 'question' && (
+            {role === 'joueur' && state.tunnelSubPhase === 'question' && (
               <p className="text-xs tracking-wide text-[#9a8d7d] uppercase">
                 Le Présentateur juge la réponse…
               </p>
             )}
 
             {/* Continuer / Coffrer : choix révélé (choice_open), appartient
-                au Joueur — jamais au Présentateur. */}
-            {isPlayer && state.tunnelSubPhase === 'after-success-open' && (
+                au seul Joueur dont c'est le tour — jamais au Présentateur ni
+                aux autres joueurs. */}
+            {isCurrentPlayer && state.tunnelSubPhase === 'after-success-open' && (
               <>
                 <Button variant="primary" onClick={() => dispatch({ type: 'CONTINUE' })}>
                   Continuer

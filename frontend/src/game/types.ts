@@ -8,6 +8,10 @@ export type Theme = {
 }
 
 export type Player = {
+  // localPlayerId d'origine, assigné par le serveur de room — voir
+  // docs/websocket-protocol.md. Absent dans l'ancien POC hotseat local,
+  // généré uniquement côté client factice pour le mode styleguide/debug.
+  id: string
   name: string
   points: number
 }

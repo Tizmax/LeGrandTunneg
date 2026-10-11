@@ -1,6 +1,6 @@
-import { useState } from 'react'
 import type { GameAction } from '../game/gameReducer'
 import type { GameState } from '../game/types'
+import type { Role } from '../net/types'
 import { ScreenShell } from '../components/ScreenShell'
 import { Button } from '../components/Button'
 import { ArtDecoCorner } from '../components/decor/ArtDecoCorner'
@@ -8,18 +8,21 @@ import { ArtDecoCorner } from '../components/decor/ArtDecoCorner'
 type MenuScreenProps = {
   state: GameState
   dispatch: React.Dispatch<GameAction>
+  role: Role
+  roomCode: string
 }
 
-export function MenuScreen({ state, dispatch }: MenuScreenProps) {
-  const [name, setName] = useState('')
-
-  function handleAdd() {
-    if (!name.trim()) return
-    dispatch({ type: 'ADD_PLAYER', name })
-    setName('')
-  }
-
+/**
+ * Lobby de la room multi (Bloc 7) : les joueurs rejoignent eux-mêmes la room
+ * via l'écran d'accueil (POST /api/rooms/{code}/join), ils n'apparaissent
+ * donc plus ici via une saisie locale (contrairement à l'ancien POC hotseat
+ * — voir game/gameReducer.ts, action ADD_PLAYER désormais sans effet réseau,
+ * voir net/dispatchAdapter.ts). Seul le Présentateur peut retirer un
+ * participant ou lancer la suite (`lobby:go_to_themes`).
+ */
+export function MenuScreen({ state, dispatch, role, roomCode }: MenuScreenProps) {
   const canContinue = state.players.length >= 2
+  const isPresenter = role === 'presentateur'
 
   return (
     <ScreenShell spotlight smoke>
@@ -32,7 +35,9 @@ export function MenuScreen({ state, dispatch }: MenuScreenProps) {
             Le Grand Tunneg
           </h1>
           <p className="mt-3 text-sm tracking-[0.3em] text-[#9a8d7d] uppercase">
-            Ajoutez les joueurs pour commencer
+            {isPresenter
+              ? 'Partagez le code pour que les joueurs rejoignent'
+              : 'En attente du lancement de la partie…'}
           </p>
         </div>
 
@@ -41,40 +46,39 @@ export function MenuScreen({ state, dispatch }: MenuScreenProps) {
           <ArtDecoCorner position="top-right" />
           <ArtDecoCorner position="bottom-left" />
           <ArtDecoCorner position="bottom-right" />
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleAdd()
-              }}
-              placeholder="Nom du joueur"
-              maxLength={24}
-              className="flex-1 rounded-lg border border-brass-600/30 bg-charcoal-900/80 px-4 py-2.5 text-[#f1e6d8] placeholder-[#6b625b] shadow-[inset_0_2px_6px_rgba(0,0,0,0.4)] outline-none focus:border-amber-glow focus:shadow-[inset_0_2px_6px_rgba(0,0,0,0.4),0_0_0_3px_rgba(232,163,61,0.2)]"
-            />
-            <Button variant="primary" onClick={handleAdd} disabled={!name.trim()}>
-              Ajouter
-            </Button>
+
+          <div className="mb-5 flex flex-col items-center gap-1">
+            <span className="text-xs tracking-[0.3em] text-[#9a8d7d] uppercase">
+              Code de la room
+            </span>
+            <span className="font-display text-3xl font-black tracking-[0.3em] text-amber-glow">
+              {roomCode}
+            </span>
           </div>
 
-          {state.players.length > 0 && (
-            <ul className="mt-5 flex flex-col gap-2">
+          {state.players.length > 0 ? (
+            <ul className="flex flex-col gap-2">
               {state.players.map((player, i) => (
                 <li
-                  key={player.name + i}
+                  key={player.id}
                   className="flex items-center justify-between rounded-lg border border-white/5 bg-charcoal-900/60 px-4 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
                 >
                   <span className="font-display text-lg text-[#f1e6d8]">{player.name}</span>
-                  <button
-                    onClick={() => dispatch({ type: 'REMOVE_PLAYER', index: i })}
-                    className="cursor-pointer text-xs tracking-wide text-burgundy-500 uppercase transition-colors hover:text-burgundy-500/70"
-                  >
-                    Retirer
-                  </button>
+                  {isPresenter && (
+                    <button
+                      onClick={() => dispatch({ type: 'REMOVE_PLAYER', index: i })}
+                      className="cursor-pointer text-xs tracking-wide text-burgundy-500 uppercase transition-colors hover:text-burgundy-500/70"
+                    >
+                      Retirer
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
+          ) : (
+            <p className="text-center text-xs text-[#7a6f63]">
+              Aucun joueur n'a encore rejoint la room.
+            </p>
           )}
 
           {state.players.length < 2 && (
@@ -84,14 +88,16 @@ export function MenuScreen({ state, dispatch }: MenuScreenProps) {
           )}
         </div>
 
-        <Button
-          variant="gold"
-          className="animate-rise-up px-10 py-3 text-base"
-          disabled={!canContinue}
-          onClick={() => dispatch({ type: 'GO_TO_THEMES' })}
-        >
-          Continuer
-        </Button>
+        {isPresenter && (
+          <Button
+            variant="gold"
+            className="animate-rise-up px-10 py-3 text-base"
+            disabled={!canContinue}
+            onClick={() => dispatch({ type: 'GO_TO_THEMES' })}
+          >
+            Continuer
+          </Button>
+        )}
       </div>
     </ScreenShell>
   )

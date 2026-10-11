@@ -13,7 +13,7 @@ export function ScoreBoard({ players, currentPlayerIndex }: ScoreBoardProps) {
         const isCurrent = i === currentPlayerIndex
         return (
           <div
-            key={player.name + i}
+            key={player.id}
             className={`relative rounded-lg border px-4 py-2 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_-4px_rgba(0,0,0,0.6)] transition-all duration-300 ${
               isCurrent
                 ? 'border-amber-glow bg-gradient-to-b from-amber-glow/15 to-charcoal-900 shadow-[0_0_20px_-2px_rgba(232,163,61,0.6),inset_0_1px_0_rgba(255,255,255,0.1)]'

@@ -51,7 +51,14 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
     case 'ADD_PLAYER': {
       const name = action.name.trim()
       if (!name) return state
-      return { ...state, players: [...state.players, { name, points: 0 }] }
+      // Reducer local conservé pour StyleguideScreen (Bloc 6) et un futur mode
+      // solo hotseat (Bloc 7bis) ; id généré localement car il n'y a pas de
+      // serveur de room dans ce chemin (contrairement au mode multi réseau,
+      // voir net/useRoomConnection.ts où `id` vient du serveur).
+      const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `local-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      return { ...state, players: [...state.players, { id, name, points: 0 }] }
     }
 
     case 'REMOVE_PLAYER': {
