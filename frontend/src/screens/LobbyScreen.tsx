@@ -178,7 +178,7 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
             Sur grand écran : fixé à droite pour laisser la carte principale centrée.
             Sur mobile : dans le flux normal sous la carte principale. */}
         {isPresenter && (
-          <div className="animate-rise-up lg:fixed lg:right-4 lg:top-4 lg:bottom-4 w-full max-w-md lg:w-64 lg:max-w-none rounded-2xl border border-brass-600/30 bg-gradient-to-b from-charcoal-800 to-charcoal-900 p-5 shadow-stage-lg lg:flex lg:flex-col">
+          <div className="animate-rise-up lg:fixed lg:right-4 lg:top-1/2 lg:-translate-y-1/2 w-full max-w-md lg:w-64 lg:max-w-none rounded-2xl border border-brass-600/30 bg-gradient-to-b from-charcoal-800 to-charcoal-900 p-5 shadow-stage-lg">
             <p className="mb-3 text-center text-xs tracking-[0.4em] text-brass-400/80 uppercase">
               ★ Thèmes ★
             </p>
@@ -201,7 +201,7 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
             </div>
 
               {state.themes.length > 0 && (
-                <ul className="mt-3 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
+                <ul className="mt-5 flex max-h-64 flex-col gap-2 overflow-y-auto pr-1">
                   {state.themes.map((theme, i) => (
                     <li
                       key={i}
