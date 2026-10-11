@@ -221,8 +221,22 @@ def select_theme(
         phase="tunnel",
         themes=themes,
         active_theme_index=index,
-        tunnel_sub_phase="question",
+        tunnel_sub_phase="question-pending",
     )
+
+
+# --- Lancement du chrono (Présentateur) --------------------------------------
+
+
+def start_timer(state: GameState, actor_role: Role) -> GameState:
+    """Le Présentateur a fini de poser sa question à l'oral et déclenche le
+    chrono : question-pending -> question. Avant cet appel, le joueur
+    concerné voit un écran "écoute la question" sans minuteur ; après, le
+    jugement (Bonne/Mauvaise réponse/Passer) devient possible."""
+    _require_role(actor_role, "presentateur")
+    if state.phase != "tunnel" or state.tunnel_sub_phase != "question-pending":
+        raise GameError("invalid_phase", "Aucune question en attente de lancement du chrono.")
+    return replace(state, tunnel_sub_phase="question")
 
 
 # --- Jugement de la réponse orale (Présentateur) -----------------------------
@@ -336,7 +350,7 @@ def continue_tunnel(
         replace(t, discovered=True) if i == idx else t
         for i, t in enumerate(state.themes)
     )
-    return replace(state, themes=themes, tunnel_sub_phase="question")
+    return replace(state, themes=themes, tunnel_sub_phase="question-pending")
 
 
 def vault(state: GameState, actor_role: Role, actor_player_id: str) -> GameState:
@@ -403,6 +417,7 @@ __all__ = [
     "start_game",
     "reveal_choice",
     "select_theme",
+    "start_timer",
     "good_answer",
     "bad_answer",
     "pass_question",

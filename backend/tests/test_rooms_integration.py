@@ -120,11 +120,31 @@ def test_full_multi_client_flow() -> None:
         assert err["type"] == "error"
         assert err["payload"]["code"] == "not_your_turn"
 
-        # Le bon joueur sélectionne le thème -> broadcast à tous.
+        # Le bon joueur sélectionne le thème -> broadcast à tous, entre dans
+        # question-pending (le Présentateur n'a pas encore lancé le chrono).
         current_player_ws.send_json({"type": "theme:select", "payload": {"index": 0}})
         for ws in (ws_pres, ws_p1, ws_p2):
             msg = ws.receive_json()
             assert msg["payload"]["state"]["phase"] == "tunnel"
+            assert msg["payload"]["state"]["tunnelSubPhase"] == "question-pending"
+
+        # --- Rejet : jugement de réponse refusé tant que le chrono n'est pas lancé.
+        ws_pres.send_json({"type": "answer:good", "payload": {}})
+        err = ws_pres.receive_json()
+        assert err["type"] == "error"
+        assert err["payload"]["code"] == "invalid_phase"
+
+        # --- Rejet : timer:start refusé pour un Joueur.
+        current_player_ws.send_json({"type": "timer:start", "payload": {}})
+        err = current_player_ws.receive_json()
+        assert err["type"] == "error"
+        assert err["payload"]["code"] == "forbidden_role"
+
+        # Présentateur a fini de poser sa question -> lance le chrono.
+        ws_pres.send_json({"type": "timer:start", "payload": {}})
+        for ws in (ws_pres, ws_p1, ws_p2):
+            msg = ws.receive_json()
+            assert msg["payload"]["state"]["tunnelSubPhase"] == "question"
 
         # Présentateur juge bonne réponse -> progress_value=1, after-success-pending.
         ws_pres.send_json({"type": "answer:good", "payload": {}})

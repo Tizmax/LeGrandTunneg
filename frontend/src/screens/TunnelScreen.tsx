@@ -56,13 +56,32 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
             <Tunnel theme={theme} />
           </div>
 
-          <div className="animate-rise-up">
-            <CountdownTimer
-              key={`${state.activeThemeIndex}-${theme.progressValue}-${state.tunnelSubPhase}`}
-            />
-          </div>
+          {/* Couche show : le chrono ne s'affiche/démarre qu'une fois que le
+              Présentateur a fini de poser sa question (tunnelSubPhase
+              'question', pas encore 'question-pending'). */}
+          {state.tunnelSubPhase === 'question' && (
+            <div className="animate-rise-up">
+              <CountdownTimer
+                key={`${state.activeThemeIndex}-${theme.progressValue}-${state.tunnelSubPhase}`}
+              />
+            </div>
+          )}
 
           <div className="animate-rise-up flex flex-wrap justify-center gap-4 pt-2">
+            {/* Couche show : question-pending — le Présentateur pose sa
+                question à l'oral puis déclenche lui-même le chrono. */}
+            {isPresenter && state.tunnelSubPhase === 'question-pending' && (
+              <Button variant="gold" onClick={() => dispatch({ type: 'START_TIMER' })}>
+                Lancer le chrono
+              </Button>
+            )}
+
+            {role === 'joueur' && state.tunnelSubPhase === 'question-pending' && (
+              <p className="text-xs tracking-wide text-[#9a8d7d] uppercase">
+                Écoutez la question…
+              </p>
+            )}
+
             {/* Bonne réponse / Mauvaise réponse / Passer : jugement de la
                 réponse, réservé au Présentateur (lui seul connaît la bonne
                 réponse) — jamais visible côté Joueur ni Écran principal. */}

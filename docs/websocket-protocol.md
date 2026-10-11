@@ -5,6 +5,13 @@ created: 2026-10-11
 
 # Protocole WebSocket — mode room multi (Bloc 3)
 
+**Mise à jour 2026-10-11** : ajout du sous-état `question-pending` entre la
+sélection du thème (ou "Continuer") et le lancement effectif du chrono. Le
+Présentateur pose désormais sa question à l'oral avant de déclencher
+manuellement le minuteur via `timer:start` — voir table des messages et la
+spécification figée dans l'exec-plan pour le détail des deux temps côté
+joueur ("écoute la question" puis "attend le verdict").
+
 Portée de cette version : **état de room et de partie entièrement en mémoire
 process-local** (pas de Postgres branché). La persistance (Bloc 2) et la
 reprise après redémarrage du serveur viendront dans une passe ultérieure — ce
@@ -94,7 +101,7 @@ type GamePhase =
   | 'menu' | 'themes' | 'selection-pending' | 'selection' | 'tunnel' | 'end'
 
 type TunnelSubPhase =
-  | 'question' | 'after-success-pending' | 'after-success-open' | null
+  | 'question-pending' | 'question' | 'after-success-pending' | 'after-success-open' | null
 
 type HistoryEntry = { themeLabel: string; playerName: string; pointsGained: number }
 
@@ -120,6 +127,7 @@ type GameState = {
 | `game:start`      | `{}`                    | Présentateur                                    | `phase === 'themes'`, `themes.length >= 1`                                | `START_GAME`                                 |
 | `choice:reveal`   | `{}`                    | Présentateur                                    | `phase === 'selection-pending'` OU `tunnelSubPhase === 'after-success-pending'` | `REVEAL_CHOICE`                         |
 | `theme:select`    | `{ index }`             | **Joueur concerné** (`players[currentPlayerIndex].id`) | `phase === 'selection'` (choice_open), thème visé non `completed`    | `SELECT_THEME`                               |
+| `timer:start`     | `{}`                    | Présentateur                                    | `phase === 'tunnel'`, `tunnelSubPhase === 'question-pending'`              | *(nouveau — pas d'équivalent POC)*           |
 | `answer:good`     | `{}`                    | Présentateur                                    | `phase === 'tunnel'`, `tunnelSubPhase === 'question'`                      | `GOOD_ANSWER`                                |
 | `answer:bad`      | `{}`                    | Présentateur                                    | `phase === 'tunnel'`, `tunnelSubPhase === 'question'`                      | `BAD_ANSWER`                                 |
 | `answer:pass`     | `{}`                    | Présentateur                                    | `phase === 'tunnel'`, `tunnelSubPhase === 'question'`                      | `PASS`                                       |

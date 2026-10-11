@@ -97,6 +97,10 @@ def _h_theme_select(state: GameState, payload: dict, role: str, pid: str) -> Gam
     return engine.select_theme(state, _require_int(payload, "index"), role, pid)
 
 
+def _h_timer_start(state: GameState, payload: dict, role: str, pid: str) -> GameState:
+    return engine.start_timer(state, role)
+
+
 def _h_answer_good(state: GameState, payload: dict, role: str, pid: str) -> GameState:
     return engine.good_answer(state, role)
 
@@ -136,6 +140,7 @@ _HANDLERS: dict[str, Callable[[GameState, dict, str, str], GameState]] = {
     "game:start": _h_game_start,
     "choice:reveal": _h_choice_reveal,
     "theme:select": _h_theme_select,
+    "timer:start": _h_timer_start,
     "answer:good": _h_answer_good,
     "answer:bad": _h_answer_bad,
     "answer:pass": _h_answer_pass,

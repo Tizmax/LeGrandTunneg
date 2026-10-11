@@ -37,6 +37,9 @@ export function createNetworkDispatch(send: (message: OutgoingMessage) => void) 
       case 'SELECT_THEME':
         send({ type: 'theme:select', payload: { index: action.index } })
         return
+      case 'START_TIMER':
+        send({ type: 'timer:start', payload: {} })
+        return
       case 'GOOD_ANSWER':
         send({ type: 'answer:good', payload: {} })
         return

@@ -22,7 +22,8 @@ GamePhase = Literal[
 ]
 
 TunnelSubPhase = Literal[
-    "question",  # question posée, en attente du jugement du Présentateur
+    "question-pending",  # le Présentateur pose sa question à l'oral, chrono pas encore lancé
+    "question",  # chrono lancé, question en cours, en attente du jugement du Présentateur
     "after-success-pending",  # choice_pending : Continuer/Coffrer éligible, pas révélé
     "after-success-open",  # choice_open : Continuer/Coffrer révélés, cliquables
 ]

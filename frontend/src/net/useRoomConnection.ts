@@ -37,6 +37,7 @@ export type OutgoingMessage =
   | { type: 'game:start'; payload: Record<string, never> }
   | { type: 'choice:reveal'; payload: Record<string, never> }
   | { type: 'theme:select'; payload: { index: number } }
+  | { type: 'timer:start'; payload: Record<string, never> }
   | { type: 'answer:good'; payload: Record<string, never> }
   | { type: 'answer:bad'; payload: Record<string, never> }
   | { type: 'answer:pass'; payload: Record<string, never> }

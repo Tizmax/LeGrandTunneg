@@ -25,7 +25,8 @@ export type GamePhase =
   | 'end' // end-game podium
 
 export type TunnelSubPhase =
-  | 'question' // a question was just asked, awaiting outcome (pas concerné par la couche show)
+  | 'question-pending' // couche show : le Présentateur pose sa question à l'oral, chrono pas encore lancé
+  | 'question' // chrono lancé, question en cours, en attente du jugement du Présentateur
   | 'after-success-pending' // choice_pending : bonne réponse non terminale, Continuer/Coffrer éligible mais pas encore révélé
   | 'after-success-open' // choice_open : Continuer/Coffrer révélés, visibles/cliquables par le joueur
 

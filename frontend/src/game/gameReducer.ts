@@ -9,6 +9,9 @@ export type GameAction =
   | { type: 'REMOVE_THEME'; index: number }
   | { type: 'START_GAME' }
   | { type: 'SELECT_THEME'; index: number }
+  // Couche show : le Présentateur a fini de poser sa question à l'oral et
+  // déclenche manuellement le chrono (question-pending -> question).
+  | { type: 'START_TIMER' }
   | { type: 'GOOD_ANSWER' }
   | { type: 'BAD_ANSWER' }
   | { type: 'PASS' }
@@ -114,8 +117,15 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         phase: 'tunnel',
         themes: updatedThemes,
         activeThemeIndex: action.index,
-        tunnelSubPhase: 'question',
+        // Couche show : le Présentateur doit poser sa question avant de
+        // lancer le chrono (voir action START_TIMER).
+        tunnelSubPhase: 'question-pending',
       }
+    }
+
+    case 'START_TIMER': {
+      if (state.tunnelSubPhase !== 'question-pending') return state
+      return { ...state, tunnelSubPhase: 'question' }
     }
 
     case 'GOOD_ANSWER': {
@@ -237,7 +247,9 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       return {
         ...state,
         themes: updatedThemes,
-        tunnelSubPhase: 'question',
+        // Couche show : repasse par question-pending, le Présentateur doit
+        // reposer sa question avant de relancer le chrono.
+        tunnelSubPhase: 'question-pending',
       }
     }
 

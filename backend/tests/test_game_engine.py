@@ -46,6 +46,19 @@ def current_player_id(state: GameState) -> str:
     return state.players[state.current_player_index].id
 
 
+def select_and_start(state: GameState, index: int, pid: str) -> GameState:
+    """Sélectionne un thème puis lance immédiatement le chrono (le
+    Présentateur a fini de poser sa question) — raccourci pour les tests qui
+    ne portent pas sur le nouveau sous-état question-pending lui-même."""
+    state = engine.select_theme(state, index, "joueur", pid)
+    return engine.start_timer(state, "presentateur")
+
+
+def continue_and_start(state: GameState, pid: str) -> GameState:
+    state = engine.continue_tunnel(state, "joueur", pid)
+    return engine.start_timer(state, "presentateur")
+
+
 # --- Barème de points --------------------------------------------------------
 
 
@@ -89,7 +102,7 @@ def test_auto_coffrage_at_square_10_skips_choice_pending() -> None:
     state = engine.start_game(state, "presentateur", rng=random.Random(0))
     state = engine.reveal_choice(state, "presentateur")
     pid = current_player_id(state)
-    state = engine.select_theme(state, 0, "joueur", pid)
+    state = select_and_start(state, 0, pid)
     assert state.phase == "tunnel"
 
     # 10 bonnes réponses : les 9 premières font progress_value 0->9 (en
@@ -103,7 +116,7 @@ def test_auto_coffrage_at_square_10_skips_choice_pending() -> None:
             assert state.tunnel_sub_phase == "after-success-pending"
             state = engine.reveal_choice(state, "presentateur")
             pid = current_player_id(state)
-            state = engine.continue_tunnel(state, "joueur", pid)
+            state = continue_and_start(state, pid)
             assert state.tunnel_sub_phase == "question"
 
     # Après la 9e bonne réponse, progress_value doit être passé de 9 à 10 et
@@ -126,14 +139,14 @@ def test_bad_answer_does_not_lose_progress() -> None:
     state = started_selection_open()
     starting_index = state.current_player_index
     pid = current_player_id(state)
-    state = engine.select_theme(state, 0, "joueur", pid)
+    state = select_and_start(state, 0, pid)
     state = engine.good_answer(state, "presentateur")  # progress_value -> 1
     theme_before = state.themes[0]
     assert theme_before.progress_value == 1
 
     state = engine.reveal_choice(state, "presentateur")
     pid = current_player_id(state)
-    state = engine.continue_tunnel(state, "joueur", pid)
+    state = continue_and_start(state, pid)
     state = engine.bad_answer(state, "presentateur")
 
     theme_after = state.themes[0]
@@ -152,7 +165,7 @@ def test_pass_nullifies_square_permanently_even_after_vault() -> None:
     state = started_selection_open()
     starting_index = state.current_player_index
     pid = current_player_id(state)
-    state = engine.select_theme(state, 0, "joueur", pid)
+    state = select_and_start(state, 0, pid)
 
     # Passer sur la case 1 : nullified=[1], progress_value=1, joueur reste actif.
     state = engine.pass_question(state, "presentateur")
@@ -167,7 +180,7 @@ def test_pass_nullifies_square_permanently_even_after_vault() -> None:
     # jamais rapporter de points, même si validated_squares la dépasse.
     state = engine.reveal_choice(state, "presentateur")
     pid = current_player_id(state)
-    state = engine.select_theme(state, 0, "joueur", pid)
+    state = select_and_start(state, 0, pid)
     state = engine.good_answer(state, "presentateur")  # progress_value -> 2
     state = engine.reveal_choice(state, "presentateur")
     pid = current_player_id(state)
@@ -188,11 +201,11 @@ def test_progress_can_be_stolen_by_another_player() -> None:
     state = started_selection_open()
     starting_index = state.current_player_index
     first_player = current_player_id(state)
-    state = engine.select_theme(state, 0, "joueur", first_player)
+    state = select_and_start(state, 0, first_player)
     state = engine.good_answer(state, "presentateur")  # progress_value -> 1 (vert)
     assert state.tunnel_sub_phase == "after-success-pending"
     state = engine.reveal_choice(state, "presentateur")
-    state = engine.continue_tunnel(state, "joueur", first_player)
+    state = continue_and_start(state, first_player)
     state = engine.bad_answer(state, "presentateur")  # tour passe, case verte reste
     assert state.current_player_index == (starting_index + 1) % len(state.players)
     second_player = current_player_id(state)
@@ -200,7 +213,7 @@ def test_progress_can_be_stolen_by_another_player() -> None:
 
     # Le 2e joueur reprend le même thème (toujours vert, progress_value=1) et coffre.
     state = engine.reveal_choice(state, "presentateur")  # selection-pending -> selection
-    state = engine.select_theme(state, 0, "joueur", second_player)
+    state = select_and_start(state, 0, second_player)
     state = engine.good_answer(state, "presentateur")  # progress_value -> 2
     state = engine.reveal_choice(state, "presentateur")  # after-success-pending -> open
     state = engine.vault(state, "joueur", second_player)
@@ -254,7 +267,7 @@ def test_select_completed_theme_is_rejected() -> None:
 def test_reset_game_keeps_players_and_themes_zeroes_progress() -> None:
     state = started_selection_open()
     pid = current_player_id(state)
-    state = engine.select_theme(state, 0, "joueur", pid)
+    state = select_and_start(state, 0, pid)
     state = engine.good_answer(state, "presentateur")
 
     state = engine.reset_game(state, "presentateur")
@@ -318,7 +331,7 @@ def test_select_theme_rejected_while_choice_pending() -> None:
 def test_continue_or_vault_rejected_while_after_success_pending() -> None:
     state = started_selection_open()
     pid = current_player_id(state)
-    state = engine.select_theme(state, 0, "joueur", pid)
+    state = select_and_start(state, 0, pid)
     state = engine.good_answer(state, "presentateur")
     assert state.tunnel_sub_phase == "after-success-pending"
 
@@ -359,3 +372,69 @@ def test_answer_judgement_rejected_for_non_presentateur(action: str) -> None:
     with pytest.raises(engine.GameError) as exc_info:
         fn(state, "joueur")
     assert exc_info.value.code == "forbidden_role"
+
+
+# --- Couche show : délai de lancement du chrono (question-pending) ----------
+
+
+def test_select_theme_enters_question_pending_not_question() -> None:
+    state = started_selection_open()
+    pid = current_player_id(state)
+    state = engine.select_theme(state, 0, "joueur", pid)
+    assert state.phase == "tunnel"
+    assert state.tunnel_sub_phase == "question-pending"
+
+
+def test_judgement_rejected_while_question_pending() -> None:
+    state = started_selection_open()
+    pid = current_player_id(state)
+    state = engine.select_theme(state, 0, "joueur", pid)
+    assert state.tunnel_sub_phase == "question-pending"
+
+    for action in ("good_answer", "bad_answer", "pass_question"):
+        with pytest.raises(engine.GameError) as exc_info:
+            getattr(engine, action)(state, "presentateur")
+        assert exc_info.value.code == "invalid_phase"
+
+
+def test_start_timer_transitions_question_pending_to_question() -> None:
+    state = started_selection_open()
+    pid = current_player_id(state)
+    state = engine.select_theme(state, 0, "joueur", pid)
+    state = engine.start_timer(state, "presentateur")
+    assert state.tunnel_sub_phase == "question"
+    # Une fois le chrono lancé, le jugement devient possible.
+    state = engine.good_answer(state, "presentateur")
+    assert state.themes[0].progress_value == 1
+
+
+def test_start_timer_rejected_for_non_presentateur() -> None:
+    state = started_selection_open()
+    pid = current_player_id(state)
+    state = engine.select_theme(state, 0, "joueur", pid)
+    with pytest.raises(engine.GameError) as exc_info:
+        engine.start_timer(state, "joueur")
+    assert exc_info.value.code == "forbidden_role"
+
+
+def test_start_timer_rejected_outside_question_pending() -> None:
+    state = started_selection_open()
+    with pytest.raises(engine.GameError) as exc_info:
+        engine.start_timer(state, "presentateur")
+    assert exc_info.value.code == "invalid_phase"
+
+
+def test_continue_tunnel_re_enters_question_pending() -> None:
+    state = started_selection_open()
+    pid = current_player_id(state)
+    state = select_and_start(state, 0, pid)
+    state = engine.good_answer(state, "presentateur")  # progress_value -> 1
+    assert state.tunnel_sub_phase == "after-success-pending"
+    state = engine.reveal_choice(state, "presentateur")
+    state = engine.continue_tunnel(state, "joueur", pid)
+    # Continuer repasse par question-pending, PAS directement question : le
+    # Présentateur doit reposer sa question avant de relancer le chrono.
+    assert state.tunnel_sub_phase == "question-pending"
+    with pytest.raises(engine.GameError) as exc_info:
+        engine.good_answer(state, "presentateur")
+    assert exc_info.value.code == "invalid_phase"
