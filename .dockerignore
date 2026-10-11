@@ -1,0 +1,17 @@
+# Backend
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.pytest_cache/
+backend/*.db
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Divers
+.git/
+.env
+.env.local
+docs/
+*.md
