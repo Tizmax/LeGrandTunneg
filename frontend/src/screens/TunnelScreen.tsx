@@ -8,7 +8,6 @@ import { Tunnel } from '../components/Tunnel'
 import { CountdownTimer } from '../components/CountdownTimer'
 import { CurtainReveal } from '../components/decor/CurtainReveal'
 import { RoomOverview } from '../components/RoomOverview'
-import { ChoicePendingScreen } from './ChoicePendingScreen'
 
 type TunnelScreenProps = {
   state: GameState
@@ -22,14 +21,6 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
   const currentPlayer = state.players[state.currentPlayerIndex]
 
   if (!theme) return null
-
-  // Couche show : choix Continuer/Coffrer pas encore révélé par le
-  // Présentateur -> écran d'attente neutre, aucune option visible.
-  if (state.tunnelSubPhase === 'after-success-pending') {
-    return (
-      <ChoicePendingScreen state={state} dispatch={dispatch} isPresenterView={role === 'presentateur'} />
-    )
-  }
 
   const isPresenter = role === 'presentateur'
   // Seul le joueur dont c'est le tour peut voir Continuer/Coffrer — un autre
@@ -102,6 +93,25 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
             {role === 'joueur' && state.tunnelSubPhase === 'question' && (
               <p className="text-xs tracking-wide text-[#9a8d7d] uppercase">
                 Le Présentateur juge la réponse…
+              </p>
+            )}
+
+            {/* Couche show : after-success-pending — le thème/tunnel reste
+                entièrement visible (principe : le temps d'attente du
+                Présentateur ne doit pas changer drastiquement ce que voit
+                le joueur, pour qu'il puisse faire un choix éclairé). Seul
+                le bouton de révélation du Présentateur est ajouté ; les
+                boutons Rester sur scène/Descendre restent masqués tant que
+                le choix n'est pas ouvert. */}
+            {isPresenter && state.tunnelSubPhase === 'after-success-pending' && (
+              <Button variant="gold" onClick={() => dispatch({ type: 'REVEAL_CHOICE' })}>
+                Lancer le choix
+              </Button>
+            )}
+
+            {role === 'joueur' && state.tunnelSubPhase === 'after-success-pending' && (
+              <p className="text-xs tracking-wide text-[#9a8d7d] uppercase">
+                {currentPlayer?.name} va décider…
               </p>
             )}
 

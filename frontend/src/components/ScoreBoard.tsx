@@ -21,12 +21,18 @@ export function ScoreBoard({ players, currentPlayerIndex }: ScoreBoardProps) {
   const count = players.length
   if (count === 0) return null
 
-  // Reconstruit l'ordre de passage à partir du joueur actif : les indices
-  // "avant" (déjà passés ce cycle) et "après" (à venir), tous deux dans le
-  // sens naturel du tour de jeu (current+1, +2, ... et current-1, -2, ...).
+  // Reconstruit l'ordre de passage à partir du joueur actif, en partageant
+  // les `count - 1` autres joueurs en deux moitiés DISJOINTES (pas de
+  // duplication si le nombre de joueurs est impair). Si le nombre de
+  // joueurs est pair, le joueur diamétralement opposé au joueur actif est
+  // équidistant dans les deux sens : il apparaît alors une fois à chaque
+  // extrémité pour équilibrer visuellement l'affichage (comportement
+  // explicitement voulu, pas un bug).
+  const otherCount = count - 1
+  const half = Math.ceil(otherCount / 2)
   const before: number[] = []
   const after: number[] = []
-  for (let step = 1; step < count; step++) {
+  for (let step = 1; step <= half; step++) {
     before.push((currentPlayerIndex - step + count) % count)
     after.push((currentPlayerIndex + step) % count)
   }
@@ -35,12 +41,12 @@ export function ScoreBoard({ players, currentPlayerIndex }: ScoreBoardProps) {
   const cour = [...before].reverse()
   const jardin = after
 
-  function renderCard(index: number, variant: 'active' | 'muted') {
+  function renderCard(index: number, variant: 'active' | 'muted', slot: string) {
     const player = players[index]
     const isActive = variant === 'active'
     return (
       <div
-        key={player.id}
+        key={`${player.id}-${slot}`}
         className={`relative rounded-lg border text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_-4px_rgba(0,0,0,0.6)] transition-all duration-300 ${
           isActive
             ? 'border-amber-glow bg-gradient-to-b from-amber-glow/15 to-charcoal-900 px-5 py-3 shadow-[0_0_20px_-2px_rgba(232,163,61,0.6),inset_0_1px_0_rgba(255,255,255,0.1)]'
@@ -77,7 +83,7 @@ export function ScoreBoard({ players, currentPlayerIndex }: ScoreBoardProps) {
         <div className="flex flex-col items-center gap-1.5">
           <span className="text-[0.6rem] tracking-[0.3em] text-[#7a6f63] uppercase">Cour</span>
           <div className="flex flex-wrap justify-end gap-2">
-            {cour.map((i) => renderCard(i, 'muted'))}
+            {cour.map((i, idx) => renderCard(i, 'muted', `cour-${idx}`))}
           </div>
         </div>
       )}
@@ -86,14 +92,14 @@ export function ScoreBoard({ players, currentPlayerIndex }: ScoreBoardProps) {
         <span className="text-[0.6rem] tracking-[0.3em] text-amber-glow/80 uppercase">
           Sur scène
         </span>
-        {renderCard(currentPlayerIndex, 'active')}
+        {renderCard(currentPlayerIndex, 'active', 'scene')}
       </div>
 
       {jardin.length > 0 && (
         <div className="flex flex-col items-center gap-1.5">
           <span className="text-[0.6rem] tracking-[0.3em] text-[#7a6f63] uppercase">Jardin</span>
           <div className="flex flex-wrap justify-start gap-2">
-            {jardin.map((i) => renderCard(i, 'muted'))}
+            {jardin.map((i, idx) => renderCard(i, 'muted', `jardin-${idx}`))}
           </div>
         </div>
       )}

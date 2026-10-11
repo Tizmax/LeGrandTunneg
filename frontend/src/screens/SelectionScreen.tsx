@@ -67,7 +67,7 @@ export function SelectionScreen({ state, dispatch, role, localPlayerId }: Select
           )}
         </div>
 
-        <div className="animate-rise-up grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="animate-rise-up grid flex-1 grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {state.themes.map((theme, i) => {
             const disabled = theme.completed || !isInteractive
             const content = (
@@ -84,10 +84,10 @@ export function SelectionScreen({ state, dispatch, role, localPlayerId }: Select
                     />
                   </>
                 )}
-                <span className="font-display text-xl font-semibold text-[#f1e6d8]">
+                <span className="font-display text-sm font-semibold text-[#f1e6d8]">
                   {theme.label}
                   {theme.completed && (
-                    <span className="ml-2 text-xs font-normal text-[#7a6f63] uppercase">
+                    <span className="ml-1 text-[0.6rem] font-normal text-[#7a6f63] uppercase">
                       (terminé)
                     </span>
                   )}
@@ -95,7 +95,7 @@ export function SelectionScreen({ state, dispatch, role, localPlayerId }: Select
                 <MiniProgressBar theme={theme} />
               </>
             )
-            const className = `group relative flex flex-col gap-4 overflow-hidden rounded-xl border p-5 text-left transition-all duration-300 ${
+            const className = `group relative flex flex-col gap-2 overflow-hidden rounded-xl border p-3 text-left transition-all duration-300 ${
               theme.completed
                 ? 'cursor-not-allowed border-charcoal-700 bg-charcoal-900/50 opacity-40 grayscale'
                 : isInteractive

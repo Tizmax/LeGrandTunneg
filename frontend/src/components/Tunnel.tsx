@@ -51,13 +51,13 @@ export function Tunnel({ theme }: TunnelProps) {
             <div key={k} className="flex items-center">
               <div className="flex flex-col items-center">
                 <div
-                  className={`flex h-16 w-10 flex-col items-center justify-end rounded-md border-2 pb-1.5 text-sm font-bold transition-all duration-500 sm:h-24 sm:w-14 sm:text-base ${squareFullClasses[color]} ${ignited[k] ? 'animate-square-ignite' : ''}`}
+                  className={`flex h-20 w-12 flex-col items-center justify-end rounded-md border-2 pb-1.5 text-base font-bold transition-all duration-500 sm:h-32 sm:w-20 sm:text-xl ${squareFullClasses[color]} ${ignited[k] ? 'animate-square-ignite' : ''}`}
                 >
                   {k}
                 </div>
                 {/* Reflet au sol, façon scène éclairée */}
                 <div
-                  className="mt-1 h-1.5 w-8 rounded-full opacity-40 blur-[3px] transition-opacity duration-500 sm:w-11"
+                  className="mt-1 h-1.5 w-10 rounded-full opacity-40 blur-[3px] transition-opacity duration-500 sm:w-16"
                   style={{
                     background:
                       color === 'yellow'
