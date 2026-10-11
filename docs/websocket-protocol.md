@@ -23,6 +23,19 @@ vérifie désormais les deux préconditions (`players.length >= 2` ET
 au client via le nouveau champ `presentateurName` du DTO `GameState`
 (il n'apparaît jamais dans `players`).
 
+**Mise à jour 2026-10-11 (présence/absence + fin anticipée)** : un Joueur
+peut désormais fermer sa connexion WebSocket sans quitter définitivement la
+partie — il reste dans `players` (classement final préservé) mais passe à
+`connected: false` ; son tour est automatiquement sauté par la rotation
+(`currentPlayerIndex` avance au prochain joueur `connected: true`), sans
+jamais modifier l'ordre de jeu lui-même. À la reconnexion avec le même
+`localPlayerId`, il redevient `connected: true` et peut reprendre son tour
+s'il retombe dessus (pas de rattrapage automatique des tours manqués). Par
+ailleurs, le Présentateur dispose d'une action séparée `game:end_early`,
+visible sur tous les écrans de jeu, qui ramène **tout le monde** au lobby en
+conservant joueurs et thèmes (scores remis à zéro) — à ne pas confondre avec
+`room:quit` qui ferme intégralement la room.
+
 Portée de cette version : **état de room et de partie entièrement en mémoire
 process-local** (pas de Postgres branché). La persistance (Bloc 2) et la
 reprise après redémarrage du serveur viendront dans une passe ultérieure — ce
@@ -106,6 +119,9 @@ type Player = {
   id: string        // localPlayerId d'origine — NOUVEAU vs le POC frontend-only
   name: string
   points: number
+  // false si la connexion WS de ce joueur est actuellement fermée (il reste
+  // dans le classement, mais son tour est sauté) — ajouté 2026-10-11.
+  connected: boolean
 }
 
 type GamePhase =
@@ -148,6 +164,7 @@ type GameState = {
 | `answer:continue` | `{}`                    | **Joueur concerné**                              | `tunnelSubPhase === 'after-success-open'`                                  | `CONTINUE`                                   |
 | `answer:vault`    | `{}`                    | **Joueur concerné**                              | `tunnelSubPhase === 'after-success-open'`                                  | `COFFRER`                                    |
 | `game:reset`      | `{}`                    | Présentateur                                    | aucune (toute phase post-lobby)                                           | `RESET_GAME`                                 |
+| `game:end_early`  | `{}`                    | Présentateur                                    | aucune (visible sur tous les écrans de jeu)                               | `END_GAME_EARLY`                             |
 | `room:quit`       | `{}`                    | Présentateur                                    | aucune                                                                     | `QUIT_TO_MENU` + fermeture de la room          |
 
 « Joueur concerné » = le `localPlayerId` de la connexion émettrice doit être
@@ -167,6 +184,14 @@ Note sur `player:add` : volontairement absent de cette table. En mode multi,
 un joueur rejoint la room avec son propre pseudo via `POST
 /api/rooms/{code}/join` (étape REST, pas un message WS) — il n'y a pas de
 action WS équivalente à l'ancien `ADD_PLAYER` du POC hotseat.
+
+Note sur `game:end_early` vs `game:reset` vs `room:quit` : les trois
+réinitialisent scores/progression, mais diffèrent sur la phase cible et la
+portée — `game:reset` relance directement une sélection (`phase:
+'selection-pending'`), `game:end_early` ramène au lobby (`phase: 'lobby'`,
+pour ajuster joueurs/thèmes avant de relancer) sans fermer la room ni
+déconnecter personne, et `room:quit` ferme intégralement la room (toutes les
+connexions sont closes, l'état est supprimé du `RoomManager`).
 
 ## Messages serveur → client
 
@@ -191,6 +216,32 @@ action WS équivalente à l'ancien `ADD_PLAYER` du POC hotseat.
    `room:quit`), le serveur refuse l'upgrade WebSocket (fermeture immédiate
    avec code de fermeture applicatif, le client retombe sur l'écran
    d'accueil).
+
+## Présence / absence d'un joueur (déconnexion individuelle)
+
+Un Joueur peut fermer volontairement sa connexion (bouton "Quitter la
+partie", voir `frontend/src/components/GameControls.tsx`) ou la perdre
+involontairement (réseau, onglet fermé) sans que cela affecte le reste de la
+partie :
+
+1. Dès que le serveur détecte la fermeture de la connexion WS d'un
+   participant de rôle `joueur` (`WebSocketDisconnect` ou exception), il
+   marque ce joueur `connected: false` dans `state.players` et **diffuse
+   immédiatement** `room:state_sync` à toutes les connexions encore actives
+   — pas besoin d'attendre une action quelconque d'un autre participant.
+2. Le joueur absent reste visible dans le classement (`ScoreBoard`, écran de
+   fin) avec ses points actuels, affiché grisé côté client.
+3. La rotation des tours (`currentPlayerIndex`) saute automatiquement tout
+   joueur `connected: false` — l'ordre de jeu lui-même (la liste `players`)
+   n'est jamais modifié, seul le calcul du prochain joueur actif en tient
+   compte.
+4. À la reconnexion avec le **même** `localPlayerId` (même room, même code
+   client), le joueur redevient `connected: true` et peut reprendre son tour
+   normalement s'il retombe dessus — aucun rattrapage automatique des tours
+   manqués pendant son absence.
+5. Cela ne s'applique pas au Présentateur ni à l'Écran principal (jamais
+   présents dans `players`) : leur déconnexion n'a aucun effet sur l'état de
+   la partie dans cette passe.
 
 ## Limitations connues de cette passe (à lever dans une passe ultérieure)
 

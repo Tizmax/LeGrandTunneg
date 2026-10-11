@@ -44,7 +44,7 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
         <div className="flex flex-1 flex-col items-center gap-8 py-4">
           <div className="animate-rise-up flex flex-col items-center gap-3 text-center">
             <span className="text-xs tracking-[0.3em] text-[#9a8d7d] uppercase">
-              {currentPlayer?.name} joue
+              {currentPlayer?.name} est sur scène
             </span>
             <h2 className="marquee-text font-display text-3xl font-bold sm:text-4xl">
               {theme.label}
@@ -111,10 +111,10 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
             {isCurrentPlayer && state.tunnelSubPhase === 'after-success-open' && (
               <>
                 <Button variant="primary" onClick={() => dispatch({ type: 'CONTINUE' })}>
-                  Continuer
+                  Rester sur scène
                 </Button>
                 <Button variant="gold" onClick={() => dispatch({ type: 'COFFRER' })}>
-                  Coffrer
+                  Descendre
                 </Button>
               </>
             )}

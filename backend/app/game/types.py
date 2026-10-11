@@ -45,6 +45,12 @@ class Player:
     id: str
     name: str
     points: int = 0
+    # Présence réseau (connexion WebSocket active). Un joueur déconnecté
+    # (onglet fermé, perte réseau) n'est PAS retiré de la partie : il reste
+    # affiché pour le classement final, son tour est simplement sauté tant
+    # qu'il est absent, et il reprend sa place s'il se reconnecte (voir
+    # app.game.engine.mark_player_connected). Toujours True par défaut.
+    connected: bool = True
 
 
 @dataclass(frozen=True)

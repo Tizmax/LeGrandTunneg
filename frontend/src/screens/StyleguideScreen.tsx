@@ -85,8 +85,8 @@ const SQUARE_LABELS: Record<SquareColor, string> = {
 }
 
 const demoPlayers = [
-  { id: 'demo-1', name: 'Alice', points: 12 },
-  { id: 'demo-2', name: 'Bruno', points: 7 },
+  { id: 'demo-1', name: 'Alice', points: 12, connected: true },
+  { id: 'demo-2', name: 'Bruno', points: 7, connected: true },
 ]
 
 const demoTheme = (() => {

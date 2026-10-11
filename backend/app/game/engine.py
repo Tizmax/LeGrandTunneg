@@ -64,9 +64,19 @@ def _require_current_player(
         )
 
 
-def _next_player_index(current: int, count: int) -> int:
+def _next_player_index(players: tuple[Player, ...], current: int) -> int:
+    """Avance au joueur suivant dans l'ordre fixe, en SAUTANT les joueurs
+    déconnectés (voir `set_player_connected`) : un joueur parti reste dans
+    `players` (classement final) mais son tour ne lui est plus proposé tant
+    qu'il n'est pas revenu. Si personne n'est connecté (cas limite), on
+    avance quand même d'un cran pour ne jamais bloquer le moteur."""
+    count = len(players)
     if count == 0:
         return 0
+    for step in range(1, count + 1):
+        idx = (current + step) % count
+        if players[idx].connected:
+            return idx
     return (current + 1) % count
 
 
@@ -293,7 +303,7 @@ def good_answer(state: GameState, actor_role: Role) -> GameState:
             players=players,
             history=history,
             current_player_index=_next_player_index(
-                state.current_player_index, len(state.players)
+                state.players, state.current_player_index
             ),
             phase="end" if completed else "selection-pending",
             active_theme_index=None,
@@ -313,7 +323,7 @@ def bad_answer(state: GameState, actor_role: Role) -> GameState:
         active_theme_index=None,
         tunnel_sub_phase=None,
         current_player_index=_next_player_index(
-            state.current_player_index, len(state.players)
+            state.players, state.current_player_index
         ),
     )
 
@@ -404,8 +414,54 @@ def vault(state: GameState, actor_role: Role, actor_player_id: str) -> GameState
         active_theme_index=None,
         tunnel_sub_phase=None,
         current_player_index=_next_player_index(
-            state.current_player_index, len(state.players)
+            state.players, state.current_player_index
         ),
+    )
+
+
+# --- Présence / absence d'un joueur (connexion WS individuelle) -------------
+#
+# Un joueur qui ferme son onglet ou perd sa connexion n'est PAS retiré de la
+# partie : il reste dans `state.players` (visible, conserve ses points pour
+# le classement final), seul son tour est sauté (voir `_next_player_index`).
+# S'il se reconnecte (même local_player_id), il redevient `connected` et
+# reprend sa place normalement, y compris son tour s'il retombe dessus —
+# aucun rattrapage automatique des tours manqués.
+
+
+def set_player_connected(state: GameState, player_id: str, connected: bool) -> GameState:
+    index = next((i for i, p in enumerate(state.players) if p.id == player_id), None)
+    if index is None:
+        return state
+    if state.players[index].connected == connected:
+        return state
+    players = tuple(
+        replace(p, connected=connected) if i == index else p
+        for i, p in enumerate(state.players)
+    )
+    return replace(state, players=players)
+
+
+# --- Fin de partie anticipée (Présentateur) ----------------------------------
+
+
+def end_game_early(state: GameState, actor_role: Role) -> GameState:
+    """Le Présentateur met fin à la partie en cours à tout moment et ramène
+    tout le monde au lobby — joueurs et thèmes conservés (pour relancer
+    rapidement), scores et progression remis à zéro, comme `reset_game` mais
+    vers 'lobby' plutôt que de relancer directement une sélection."""
+    _require_role(actor_role, "presentateur")
+    return replace(
+        state,
+        # `connected` n'est PAS réinitialisé ici : reflète la vraie connexion
+        # WS en cours, gérée uniquement par `set_player_connected`.
+        players=tuple(replace(p, points=0) for p in state.players),
+        themes=tuple(reset_theme(t) for t in state.themes),
+        current_player_index=0,
+        active_theme_index=None,
+        tunnel_sub_phase=None,
+        history=(),
+        phase="lobby",
     )
 
 
@@ -449,6 +505,8 @@ __all__ = [
     "pass_question",
     "continue_tunnel",
     "vault",
+    "set_player_connected",
+    "end_game_early",
     "reset_game",
     "quit_to_menu",
 ]

@@ -232,6 +232,94 @@ def test_player_and_presentateur_can_rename_themselves_in_lobby() -> None:
         assert err["payload"]["code"] == "invalid_payload"
 
 
+def test_player_disconnect_marks_absent_and_reconnect_restores_presence() -> None:
+    """Un Joueur qui ferme sa connexion WS reste dans state.players (pour le
+    classement final) mais est marqué connected=False (voir
+    engine.set_player_connected) — les autres clients déjà connectés doivent
+    recevoir le broadcast sans attendre une action quelconque. À la
+    reconnexion avec le même local_player_id, il redevient connected=True."""
+    _reset_rooms()
+    client = TestClient(app)
+    created = _create_room(client, "Paul")
+    code = created["code"]
+    presentateur_id = created["localPlayerId"]
+    joined = _join_room(client, code, "Alice")
+    player_id = joined["localPlayerId"]
+
+    with client.websocket_connect(f"/ws/{code}?local_player_id={presentateur_id}") as ws_pres:
+        ws_pres.receive_json()
+
+        with client.websocket_connect(f"/ws/{code}?local_player_id={player_id}") as ws_p1:
+            ws_p1.receive_json()
+            # Alice se (re)connecte : connected=True était déjà la valeur par
+            # défaut, donc PAS de broadcast parasite ici (voir app/api/ws.py).
+
+        # La fermeture du `with` ci-dessus clôt la connexion WS d'Alice.
+        # Le Présentateur, resté connecté, doit recevoir le state_sync
+        # marquant Alice absente.
+        msg = ws_pres.receive_json()
+        assert msg["type"] == "room:state_sync"
+        alice = next(p for p in msg["payload"]["state"]["players"] if p["id"] == player_id)
+        assert alice["connected"] is False
+
+        # Alice se reconnecte avec le même local_player_id.
+        with client.websocket_connect(f"/ws/{code}?local_player_id={player_id}") as ws_p1_again:
+            init = ws_p1_again.receive_json()
+            assert init["payload"]["state"]["players"][0]["connected"] is True
+            # Le Présentateur reçoit aussi le broadcast confirmant le retour.
+            msg2 = ws_pres.receive_json()
+            alice_again = next(
+                p for p in msg2["payload"]["state"]["players"] if p["id"] == player_id
+            )
+            assert alice_again["connected"] is True
+
+
+def test_game_end_early_returns_everyone_to_lobby() -> None:
+    """Le Présentateur peut terminer la partie en cours à tout moment —
+    différent de room:quit qui ferme toute la room : ici joueurs et thèmes
+    sont conservés, scores remis à zéro, phase='lobby' (voir
+    engine.end_game_early)."""
+    _reset_rooms()
+    client = TestClient(app)
+    created = _create_room(client, "Paul")
+    code = created["code"]
+    presentateur_id = created["localPlayerId"]
+    joined1 = _join_room(client, code, "Alice")
+    joined2 = _join_room(client, code, "Bob")
+    player1_id = joined1["localPlayerId"]
+    player2_id = joined2["localPlayerId"]
+
+    with client.websocket_connect(f"/ws/{code}?local_player_id={presentateur_id}") as ws_pres, \
+         client.websocket_connect(f"/ws/{code}?local_player_id={player1_id}") as ws_p1, \
+         client.websocket_connect(f"/ws/{code}?local_player_id={player2_id}") as ws_p2:
+        for ws in (ws_pres, ws_p1, ws_p2):
+            ws.receive_json()
+
+        ws_pres.send_json({"type": "theme:add", "payload": {"label": "Cinéma"}})
+        for ws in (ws_pres, ws_p1, ws_p2):
+            ws.receive_json()
+
+        ws_pres.send_json({"type": "game:start", "payload": {}})
+        for ws in (ws_pres, ws_p1, ws_p2):
+            ws.receive_json()
+
+        # --- Rejet : un Joueur ne peut pas terminer la partie.
+        ws_p1.send_json({"type": "game:end_early", "payload": {}})
+        err = ws_p1.receive_json()
+        assert err["type"] == "error"
+        assert err["payload"]["code"] == "forbidden_role"
+
+        # Le Présentateur termine la partie en cours.
+        ws_pres.send_json({"type": "game:end_early", "payload": {}})
+        for ws in (ws_pres, ws_p1, ws_p2):
+            msg = ws.receive_json()
+            state = msg["payload"]["state"]
+            assert state["phase"] == "lobby"
+            assert len(state["players"]) == 2
+            assert len(state["themes"]) == 1
+            assert all(p["points"] == 0 for p in state["players"])
+
+
 def test_unknown_room_rejects_websocket_upgrade() -> None:
     _reset_rooms()
     client = TestClient(app)

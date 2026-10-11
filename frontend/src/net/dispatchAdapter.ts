@@ -61,6 +61,9 @@ export function createNetworkDispatch(send: (message: OutgoingMessage) => void) 
       case 'QUIT_TO_MENU':
         send({ type: 'room:quit', payload: {} })
         return
+      case 'END_GAME_EARLY':
+        send({ type: 'game:end_early', payload: {} })
+        return
       case 'REVEAL_CHOICE':
         send({ type: 'choice:reveal', payload: {} })
         return

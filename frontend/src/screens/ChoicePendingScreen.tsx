@@ -13,14 +13,15 @@ type ChoicePendingScreenProps = {
 }
 
 /**
- * Écran de suspense neutre affiché pendant choice_pending : un choix joueur
- * (sélection de thème, ou Continuer/Coffrer) est éligible mais pas encore
- * révélé. Aucune option, aucun bouton désactivé/grisé — uniquement une
- * attente théâtrale, le temps que le Présentateur lance le choix.
+ * Écran de suspense réduit affiché pendant choice_pending du cycle
+ * Rester sur scène / Descendre : un Présentateur humain parle déjà à l'oral,
+ * donc pas de texte explicatif superflu ici — juste le nom du joueur
+ * concerné, un signe d'attente discret, et le contrôle du Présentateur.
+ * (La sélection de thème, elle, reste visible en permanence sur
+ * SelectionScreen — voir ce fichier pour le choix de design équivalent.)
  */
 export function ChoicePendingScreen({ state, dispatch, isPresenterView }: ChoicePendingScreenProps) {
   const currentPlayer = state.players[state.currentPlayerIndex]
-  const isThemeChoice = state.phase === 'selection-pending'
 
   return (
     <ScreenShell spotlight smoke>
@@ -31,20 +32,11 @@ export function ChoicePendingScreen({ state, dispatch, isPresenterView }: Choice
           <ArtDecoCorner position="bottom-left" className="opacity-40" />
           <ArtDecoCorner position="bottom-right" className="opacity-40" />
 
-          <span className="text-xs tracking-[0.35em] text-[#9a8d7d] uppercase">
-            Suspense en régie
-          </span>
           <h2 className="marquee-text font-display text-2xl font-bold sm:text-3xl">
-            {isThemeChoice
-              ? `${currentPlayer?.name}, votre thème vous attend…`
-              : `${currentPlayer?.name}, un choix décisif approche…`}
+            {currentPlayer?.name} va décider…
           </h2>
-          <p className="max-w-md text-sm text-[#d8c9b0]">
-            Le Présentateur va bientôt vous donner la parole. Patientez, les
-            projecteurs se préparent.
-          </p>
 
-          <div className="mt-4 flex gap-2" aria-hidden="true">
+          <div className="mt-2 flex gap-2" aria-hidden="true">
             <span className="h-2 w-2 animate-pulse rounded-full bg-amber-glow" />
             <span className="h-2 w-2 animate-pulse rounded-full bg-amber-glow [animation-delay:150ms]" />
             <span className="h-2 w-2 animate-pulse rounded-full bg-amber-glow [animation-delay:300ms]" />

@@ -19,7 +19,13 @@ def serialize_state(
         "phase": state.phase,
         "presentateurName": presentateur_name,
         "players": [
-            {"id": p.id, "name": p.name, "points": p.points} for p in state.players
+            {
+                "id": p.id,
+                "name": p.name,
+                "points": p.points,
+                "connected": p.connected,
+            }
+            for p in state.players
         ],
         "themes": [
             {

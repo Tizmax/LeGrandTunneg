@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import type { GameState } from './game/types'
 import type { Identity, Role } from './net/types'
@@ -16,6 +16,8 @@ import { TunnelScreen } from './screens/TunnelScreen'
 import { EndScreen } from './screens/EndScreen'
 import { StyleguideScreen } from './screens/StyleguideScreen'
 import { ScreenShell } from './components/ScreenShell'
+import { GameControls } from './components/GameControls'
+import { CurtainClose } from './components/decor/CurtainClose'
 
 function renderScreen(
   phase: string,
@@ -61,6 +63,12 @@ function renderScreen(
         />
       )
   }
+}
+
+/** La barre de contrôle (Terminer la partie / Quitter la partie) n'a pas de
+ * sens tant qu'on est encore au lobby (pas de partie en cours à quitter). */
+function shouldShowControls(phase: string): boolean {
+  return phase !== 'lobby'
 }
 
 /** Écran neutre pendant la connexion/reconnexion WebSocket. */
@@ -151,8 +159,24 @@ function App() {
   const dispatch = createNetworkDispatch(connection.send)
   const { state, role, localPlayerId } = connection
 
+  // Un Joueur quitte SA partie individuellement : ferme sa propre connexion
+  // et efface son identité locale pour revenir à l'accueil (il peut
+  // rejoindre à nouveau la même room plus tard avec le code). Les autres
+  // participants le voient simplement marqué absent côté serveur — contraste
+  // avec "Terminer la partie" (END_GAME_EARLY) qui est une action du
+  // Présentateur affectant toute la room sans déconnecter personne.
+  function handleLeave() {
+    connection.disconnect()
+    clearStoredIdentity()
+    setSession({ identity: null, connectError: null })
+  }
+
   return (
     <>
+      {shouldShowControls(state.phase) && (
+        <GameControls dispatch={dispatch} role={role} onLeave={handleLeave} />
+      )}
+      <TunnelExitCurtain phase={state.phase} />
       {/* Balayage lumineux théâtral à chaque changement d'écran, façon rideau qui se lève */}
       <AnimatePresence mode="wait">
         <motion.div
@@ -168,6 +192,30 @@ function App() {
       </AnimatePresence>
     </>
   )
+}
+
+/**
+ * Rideau de FERMETURE joué à chaque sortie du tunnel vers l'écran Sélection
+ * (mauvaise réponse, Passer, Descendre, ou coffrage automatique case 10 —
+ * peu importe la cause exacte, seule la transition de phase compte). Le
+ * rideau d'ouverture, lui, reste réservé à l'entrée dans le tunnel (géré
+ * séparément par CurtainReveal dans TunnelScreen.tsx via key=activeThemeIndex).
+ * Ce composant ne fait que détecter la transition tunnel -> !tunnel et
+ * monter l'overlay CurtainClose par-dessus l'écran déjà affiché dessous.
+ */
+function TunnelExitCurtain({ phase }: { phase: string }) {
+  const prevPhaseRef = useRef(phase)
+  const [closing, setClosing] = useState(false)
+
+  useEffect(() => {
+    if (prevPhaseRef.current === 'tunnel' && phase !== 'tunnel' && phase !== 'end') {
+      setClosing(true)
+    }
+    prevPhaseRef.current = phase
+  }, [phase])
+
+  if (!closing) return null
+  return <CurtainClose onDone={() => setClosing(false)} />
 }
 
 export default App

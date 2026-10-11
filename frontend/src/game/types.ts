@@ -14,6 +14,9 @@ export type Player = {
   id: string
   name: string
   points: number
+  // Présence réseau : un joueur déconnecté reste affiché (classement final)
+  // mais son tour est sauté côté serveur (voir docs/websocket-protocol.md).
+  connected: boolean
 }
 
 export type GamePhase =

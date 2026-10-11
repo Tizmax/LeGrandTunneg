@@ -22,6 +22,11 @@ export type GameAction =
   | { type: 'COFFRER' }
   | { type: 'RESET_GAME' }
   | { type: 'QUIT_TO_MENU' }
+  // Le Présentateur met fin à la partie en cours à tout moment (visible sur
+  // tous les écrans de jeu) : ramène tout le monde au lobby, joueurs/thèmes
+  // conservés, scores remis à zéro. Différent de QUIT_TO_MENU qui ferme
+  // toute la room.
+  | { type: 'END_GAME_EARLY' }
   // Couche show : fait passer un choix joueur de choice_pending à choice_open.
   // Déclenchée par le Présentateur (bouton "Lancer le choix"). S'applique au
   // choix de thème (phase 'selection-pending' -> 'selection') et au choix
@@ -65,7 +70,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto
         ? crypto.randomUUID()
         : `local-${Date.now()}-${Math.random().toString(36).slice(2)}`
-      return { ...state, players: [...state.players, { id, name, points: 0 }] }
+      return { ...state, players: [...state.players, { id, name, points: 0, connected: true }] }
     }
 
     case 'REMOVE_PLAYER': {
@@ -310,6 +315,22 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
 
     case 'QUIT_TO_MENU': {
       return initialState
+    }
+
+    case 'END_GAME_EARLY': {
+      // Reducer local (styleguide/solo) : pas de notion de room réseau, ce
+      // cas n'est pas exercé en pratique hors du mode réseau — voir
+      // net/dispatchAdapter.ts pour le vrai routage.
+      return {
+        ...state,
+        players: state.players.map((p) => ({ ...p, points: 0 })),
+        themes: state.themes.map(resetTheme),
+        currentPlayerIndex: 0,
+        activeThemeIndex: null,
+        tunnelSubPhase: null,
+        history: [],
+        phase: 'lobby',
+      }
     }
 
     case 'REVEAL_CHOICE': {

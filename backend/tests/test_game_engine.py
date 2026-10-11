@@ -489,3 +489,88 @@ def test_continue_tunnel_re_enters_question_pending() -> None:
     with pytest.raises(engine.GameError) as exc_info:
         engine.good_answer(state, "presentateur")
     assert exc_info.value.code == "invalid_phase"
+
+
+# --- Présence / absence d'un joueur (déconnexion, reconnexion) --------------
+
+
+def test_set_player_connected_marks_player_absent() -> None:
+    state = two_player_lobby()
+    state = engine.set_player_connected(state, "p1", False)
+    assert state.players[0].connected is False
+    assert state.players[1].connected is True
+
+
+def test_set_player_connected_is_noop_when_already_in_target_state() -> None:
+    state = two_player_lobby()
+    same_state = engine.set_player_connected(state, "p1", True)
+    # Déjà connecté par défaut : aucune mutation, même objet état renvoyé
+    # (important pour éviter un broadcast WS parasite, voir app/api/ws.py).
+    assert same_state is state
+
+
+def test_set_player_connected_unknown_player_is_noop() -> None:
+    state = two_player_lobby()
+    same_state = engine.set_player_connected(state, "unknown-id", False)
+    assert same_state is state
+
+
+def test_turn_order_skips_disconnected_players() -> None:
+    """Un joueur absent garde sa place dans le classement mais son tour est
+    sauté : _next_player_index (exercé ici via bad_answer, qui avance
+    toujours le tour sans toucher à la progression) doit passer directement
+    au joueur suivant connecté."""
+    state = started_selection_open()
+    pid = current_player_id(state)
+    state = select_and_start(state, 0, pid)
+    starting_index = state.current_player_index
+    other_index = (starting_index + 1) % 2
+    # Le joueur suivant se déconnecte avant même d'avoir joué.
+    other_id = state.players[other_index].id
+    state = engine.set_player_connected(state, other_id, False)
+    state = engine.bad_answer(state, "presentateur")
+    # Le tour doit revenir au MÊME joueur (celui de départ), pas à l'absent.
+    assert state.current_player_index == starting_index
+
+
+def test_player_reconnection_restores_turn_rotation() -> None:
+    state = two_player_lobby()
+    state = engine.set_player_connected(state, "p2", False)
+    state = engine.set_player_connected(state, "p2", True)
+    assert state.players[1].connected is True
+
+
+# --- Fin de partie anticipée (Présentateur) ----------------------------------
+
+
+def test_end_game_early_resets_to_lobby_keeping_players_and_themes() -> None:
+    state = started_selection_open()
+    pid = current_player_id(state)
+    state = select_and_start(state, 0, pid)
+    state = engine.good_answer(state, "presentateur")
+
+    state = engine.end_game_early(state, "presentateur")
+    assert state.phase == "lobby"
+    assert len(state.players) == 2
+    assert all(p.points == 0 for p in state.players)
+    assert len(state.themes) == 1
+    theme = state.themes[0]
+    assert theme.progress_value == 0 and theme.completed is False
+    assert state.current_player_index == 0
+    assert state.active_theme_index is None
+    assert state.tunnel_sub_phase is None
+    assert state.history == ()
+
+
+def test_end_game_early_does_not_reset_connected_flag() -> None:
+    state = started_selection_open()
+    state = engine.set_player_connected(state, state.players[0].id, False)
+    state = engine.end_game_early(state, "presentateur")
+    assert state.players[0].connected is False
+
+
+def test_end_game_early_rejected_for_non_presentateur() -> None:
+    state = started_selection_open()
+    with pytest.raises(engine.GameError) as exc_info:
+        engine.end_game_early(state, "joueur")
+    assert exc_info.value.code == "forbidden_role"

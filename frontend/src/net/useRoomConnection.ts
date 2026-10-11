@@ -44,6 +44,7 @@ export type OutgoingMessage =
   | { type: 'answer:continue'; payload: Record<string, never> }
   | { type: 'answer:vault'; payload: Record<string, never> }
   | { type: 'game:reset'; payload: Record<string, never> }
+  | { type: 'game:end_early'; payload: Record<string, never> }
   | { type: 'room:quit'; payload: Record<string, never> }
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'error'

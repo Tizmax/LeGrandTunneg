@@ -126,6 +126,10 @@ def _h_game_reset(state: GameState, payload: dict, role: str, pid: str) -> GameS
     return engine.reset_game(state, role)
 
 
+def _h_game_end_early(state: GameState, payload: dict, role: str, pid: str) -> GameState:
+    return engine.end_game_early(state, role)
+
+
 def _require_int(payload: dict, key: str) -> int:
     value = payload.get(key)
     if not isinstance(value, int):
@@ -150,6 +154,11 @@ _HANDLERS: dict[str, Callable[[GameState, dict, str, str], GameState]] = {
     "answer:continue": _h_answer_continue,
     "answer:vault": _h_answer_vault,
     "game:reset": _h_game_reset,
+    # Le Présentateur peut mettre fin à la partie en cours à tout moment
+    # (visible sur tous les écrans de jeu) : ramène tout le monde au lobby,
+    # joueurs/thèmes conservés, scores remis à zéro. Différent de
+    # "room:quit" qui ferme toute la room (voir boucle principale ci-dessous).
+    "game:end_early": _h_game_end_early,
     # "room:quit" est traité à part : il ferme la room plutôt que de
     # simplement muter l'état (voir boucle principale ci-dessous).
 }
@@ -169,6 +178,24 @@ async def websocket_endpoint(websocket: WebSocket, code: str, local_player_id: s
 
     await websocket.accept()
     role = room.roles[local_player_id]
+
+    # Un Joueur qui se (re)connecte redevient `connected=True` — pertinent
+    # après une déconnexion (voir bloc except ci-dessous) : son tour n'est
+    # plus sauté et les autres clients le voient réapparaître comme présent.
+    # On ne broadcast QUE si l'état a réellement changé (set_player_connected
+    # renvoie le même objet état si déjà dans le bon état) : sinon, chaque
+    # connexion initiale (joueur déjà connecté=True par défaut depuis
+    # add_player) enverrait un state_sync parasite à toute la room, avant
+    # même l'envoi du state_sync initial propre à ce client — désynchronisant
+    # l'ordre des messages reçus par les autres clients déjà connectés.
+    if role == "joueur":
+        async with room.lock:
+            previous_state = room.state
+            room.state = engine.set_player_connected(room.state, local_player_id, True)
+            changed = room.state is not previous_state
+        if changed:
+            await _broadcast_state(code)
+
     await _send_state_sync(
         websocket, code, role, local_player_id, room.state, room.presentateur_name
     )
@@ -227,9 +254,27 @@ async def websocket_endpoint(websocket: WebSocket, code: str, local_player_id: s
 
     except WebSocketDisconnect:
         room_manager.detach_connection(code, local_player_id)
+        await _mark_disconnected(code, role, local_player_id)
     except Exception:
         logger.exception("Erreur inattendue sur la connexion WS de la room %s", code)
         room_manager.detach_connection(code, local_player_id)
+        await _mark_disconnected(code, role, local_player_id)
+
+
+async def _mark_disconnected(code: str, role: str, local_player_id: str) -> None:
+    """Marque un Joueur comme absent (voir `engine.set_player_connected`) —
+    reste dans `state.players` pour le classement final, son tour est
+    simplement sauté tant qu'il n'est pas revenu. Ne s'applique pas au
+    Présentateur/Écran principal, absents de `state.players`."""
+    if role != "joueur":
+        return
+    try:
+        room = room_manager.get_room(code)
+    except RoomNotFoundError:
+        return
+    async with room.lock:
+        room.state = engine.set_player_connected(room.state, local_player_id, False)
+    await _broadcast_state(code)
 
 
 __all__ = ["router"]

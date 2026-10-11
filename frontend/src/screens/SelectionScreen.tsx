@@ -47,7 +47,7 @@ export function SelectionScreen({ state, dispatch, role, localPlayerId }: Select
       <div className="flex flex-1 flex-col gap-8 py-4">
         <div className="animate-rise-up flex flex-col items-center gap-4 text-center">
           <h2 className="marquee-text font-display text-3xl font-bold sm:text-4xl">
-            Tour de {currentPlayer?.name}
+            {currentPlayer?.name} monte sur scène
           </h2>
           <ScoreBoard players={state.players} currentPlayerIndex={state.currentPlayerIndex} />
           {!revealed && role === 'presentateur' && (
