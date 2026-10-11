@@ -155,7 +155,7 @@ Un thème avec `completed == true` (coffré jusqu'à la case 10) doit être non-
   - Done when : un test manuel ou automatisé avec au moins 3 clients WebSocket simultanés (1 Présentateur, 2 Joueurs) sur la même room montre une synchronisation correcte des scores/tours/état des cases en temps réel ; une tentative de jugement de réponse envoyée par un rôle Joueur est rejetée ; une tentative de choix joueur (sélection thème ou Continuer/Coffrer) envoyée par le Présentateur à la place du joueur concerné est rejetée ; une tentative de choix joueur envoyée par le joueur concerné alors que l'état est encore `choice_pending` est rejetée ; une tentative de `choice:reveal` envoyée par un Joueur est rejetée ; un client qui se déconnecte puis se reconnecte reçoit l'état complet et à jour de la room ; une partie terminée crée un enregistrement persistant consultable via les endpoints d'historique.
   - Depends on : Bloc 4.
 
-- [ ] **Bloc 6 — Design system frontend (DA Jazz Club)**
+- [x] **Bloc 6 — Design system frontend (DA Jazz Club)**
   - Déliverable : configuration Tailwind personnalisée (palette ambre/bordeaux/laiton/noir charbon/bleu nuit, typographie serif display + sans-serif lisible), composants de base réutilisables (boutons, cartes, modales, échelle typographique), traitement visuel de texture/grain/vignettage/spotlight.
   - Done when : une route ou page de démonstration interne rend la palette, l'échelle typographique et les composants de base de façon cohérente avec la DA décrite ; la config Tailwind est commentée/documentée (quelles couleurs/polices utiliser où).
   - Depends on : Bloc 1.
