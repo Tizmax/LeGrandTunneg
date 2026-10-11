@@ -15,7 +15,6 @@ import { ThemesScreen } from './screens/ThemesScreen'
 import { SelectionScreen } from './screens/SelectionScreen'
 import { TunnelScreen } from './screens/TunnelScreen'
 import { EndScreen } from './screens/EndScreen'
-import { ChoicePendingScreen } from './screens/ChoicePendingScreen'
 import { StyleguideScreen } from './screens/StyleguideScreen'
 import { ScreenShell } from './components/ScreenShell'
 
@@ -33,10 +32,11 @@ function renderScreen(
     case 'themes':
       return <ThemesScreen state={state} dispatch={dispatch} role={role} />
     // Couche show : choix de thème pas encore révélé par le Présentateur.
+    // Contrairement à Continuer/Coffrer, la grille de thèmes reste visible
+    // (juste non cliquable) — c'est SelectionScreen qui gère les deux
+    // phases selection-pending/selection pour ne jamais démonter/remonter
+    // la grille entre les deux (voir SelectionScreen.tsx).
     case 'selection-pending':
-      return (
-        <ChoicePendingScreen state={state} dispatch={dispatch} isPresenterView={role === 'presentateur'} />
-      )
     case 'selection':
       return <SelectionScreen state={state} dispatch={dispatch} role={role} localPlayerId={localPlayerId} />
     case 'tunnel':

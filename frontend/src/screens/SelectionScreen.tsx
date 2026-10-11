@@ -15,20 +15,32 @@ type SelectionScreenProps = {
 }
 
 /**
- * Choix du thème (choice_open) : la sélection appartient au Joueur dont
- * c'est le tour, pas au Présentateur ni aux autres joueurs. Les 3 vues
- * partagent cette grille mais avec des capacités différentes :
- * - Joueur concerné (players[currentPlayerIndex].id === localPlayerId) :
- *   grille cliquable (c'est son choix) — tout autre joueur la voit en
- *   lecture seule, le serveur rejetterait de toute façon avec
- *   `not_your_turn` (voir docs/websocket-protocol.md).
- * - Présentateur : grille en lecture seule + vue d'ensemble room + actions
- *   réservées (Réinitialiser/Retour menu).
- * - Écran principal : grille en lecture seule, aucun contrôle.
+ * Choix du thème. Deux temps, tous deux rendus par cet écran pour que la
+ * grille de thèmes (contenu informatif) reste visible en permanence — seule
+ * l'interactivité change :
+ * - `selection-pending` (choice_pending) : le choix n'est pas encore révélé.
+ *   La grille est visible pour tout le monde mais non cliquable, même pour
+ *   le joueur concerné — seul le Présentateur a un contrôle ("Lancer le
+ *   choix"). Contrairement au cycle Continuer/Coffrer (voir
+ *   ChoicePendingScreen), on choisit ici de montrer le contenu (les thèmes)
+ *   à l'avance : ce n'est pas un suspense sur le CONTENU mais sur le DROIT
+ *   d'agir, donc cacher la grille n'apporterait rien et frustrerait les
+ *   joueurs qui veulent réfléchir à leur choix pendant que le Présentateur
+ *   parle.
+ * - `selection` (choice_open) : la sélection appartient au Joueur dont
+ *   c'est le tour, pas au Présentateur ni aux autres joueurs.
+ *   - Joueur concerné (players[currentPlayerIndex].id === localPlayerId) :
+ *     grille cliquable (c'est son choix) — tout autre joueur la voit en
+ *     lecture seule, le serveur rejetterait de toute façon avec
+ *     `not_your_turn` (voir docs/websocket-protocol.md).
+ *   - Présentateur : grille en lecture seule + vue d'ensemble room +
+ *     actions réservées (Réinitialiser/Retour menu).
+ *   - Écran principal : grille en lecture seule, aucun contrôle.
  */
 export function SelectionScreen({ state, dispatch, role, localPlayerId }: SelectionScreenProps) {
   const currentPlayer = state.players[state.currentPlayerIndex]
-  const isInteractive = role === 'joueur' && currentPlayer?.id === localPlayerId
+  const revealed = state.phase === 'selection'
+  const isInteractive = revealed && role === 'joueur' && currentPlayer?.id === localPlayerId
 
   return (
     <ScreenShell>
@@ -38,7 +50,17 @@ export function SelectionScreen({ state, dispatch, role, localPlayerId }: Select
             Tour de {currentPlayer?.name}
           </h2>
           <ScoreBoard players={state.players} currentPlayerIndex={state.currentPlayerIndex} />
-          {role === 'presentateur' && (
+          {!revealed && role === 'presentateur' && (
+            <Button variant="gold" onClick={() => dispatch({ type: 'REVEAL_CHOICE' })}>
+              Lancer le choix
+            </Button>
+          )}
+          {!revealed && role !== 'presentateur' && (
+            <p className="text-xs tracking-wide text-[#9a8d7d] uppercase">
+              Le Présentateur va bientôt lancer le choix…
+            </p>
+          )}
+          {revealed && role === 'presentateur' && (
             <p className="text-xs tracking-wide text-[#9a8d7d] uppercase">
               En attente du choix du joueur
             </p>
