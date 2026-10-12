@@ -1,3 +1,4 @@
+import { Sparkles, RotateCcw, Home } from 'lucide-react'
 import type { GameAction } from '../game/gameReducer'
 import type { GameState } from '../game/types'
 import { joueurs, currentJoueur, currentJoueurIndex } from '../game/types'
@@ -55,7 +56,7 @@ export function SelectionScreen({ state, dispatch, role, localPlayerId }: Select
           <ScoreBoard players={joueurs(state)} currentPlayerIndex={currentJoueurIndex(state)} />
           {!revealed && role === 'presentateur' && (
             <Button variant="gold" onClick={() => { playEffect('reveal'); dispatch({ type: 'REVEAL_CHOICE' }) }}>
-              Lancer le choix
+              <span className="flex items-center gap-2"><Sparkles size={16} /> Lancer le choix</span>
             </Button>
           )}
           {!revealed && role !== 'presentateur' && (
@@ -125,10 +126,10 @@ export function SelectionScreen({ state, dispatch, role, localPlayerId }: Select
         {role === 'presentateur' && (
           <div className="animate-rise-up flex justify-center gap-4 pt-4">
             <Button variant="secondary" onClick={() => dispatch({ type: 'RESET_GAME' })}>
-              Réinitialiser la partie
+              <span className="flex items-center gap-2"><RotateCcw size={15} /> Réinitialiser</span>
             </Button>
             <Button variant="ghost" onClick={() => dispatch({ type: 'QUIT_TO_MENU' })}>
-              Retour au menu
+              <span className="flex items-center gap-2"><Home size={15} /> Menu</span>
             </Button>
           </div>
         )}

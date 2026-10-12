@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Copy, Check, Pencil, Trash2, DoorOpen, Rocket } from 'lucide-react'
 import type { GameAction } from '../game/gameReducer'
 import type { GameState, Player } from '../game/types'
 import type { Role } from '../net/types'
@@ -32,6 +33,14 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
   const [editingSelf, setEditingSelf] = useState(false)
   const [nameDraft, setNameDraft] = useState('')
   const [themeLabel, setThemeLabel] = useState('')
+  const [copied, setCopied] = useState(false)
+
+  function copyCode() {
+    navigator.clipboard.writeText(roomCode).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
 
   // Mon entrée dans players[]
   const me = state.players.find((p) => p.id === localPlayerId)
@@ -98,6 +107,19 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
               <p className="font-display text-3xl font-black tracking-[0.3em] text-amber-glow">
                 {roomCode}
               </p>
+              <button
+                onClick={copyCode}
+                title="Copier le code"
+                className={[
+                  'mt-2 inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-3 py-1 text-[10px] tracking-widest uppercase transition-all',
+                  copied
+                    ? 'bg-amber-glow/20 text-amber-glow'
+                    : 'text-[#9a8d7d] hover:bg-white/5 hover:text-[#d8c9b0]',
+                ].join(' ')}
+              >
+                {copied ? <Check size={11} /> : <Copy size={11} />}
+                {copied ? 'Copié !' : 'Copier'}
+              </button>
             </div>
 
             {/* Mon pseudo + renommage */}
@@ -118,8 +140,8 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
                       maxLength={24}
                       className="w-full rounded-lg border border-brass-600/30 bg-charcoal-900/80 px-3 py-1.5 text-sm text-[#f1e6d8] outline-none focus:border-amber-glow"
                     />
-                    <Button variant="primary" className="py-1.5 text-xs" onClick={confirmRename}>
-                      Valider
+                    <Button variant="primary" className="flex items-center justify-center gap-1.5 py-1.5 text-xs" onClick={confirmRename}>
+                      <Check size={13} /> Valider
                     </Button>
                   </div>
                 ) : (
@@ -127,9 +149,10 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
                     <span className="font-display text-lg text-[#f1e6d8]">{myDisplayName}</span>
                     <button
                       onClick={startEditingSelf}
-                      className="text-xs text-amber-glow uppercase transition-colors hover:text-amber-ember"
+                      title="Changer de pseudo"
+                      className="flex cursor-pointer items-center gap-1 rounded-lg p-1.5 text-[#9a8d7d] transition-colors hover:bg-white/5 hover:text-amber-glow"
                     >
-                      Changer
+                      <Pencil size={14} />
                     </button>
                   </div>
                 )}
@@ -202,8 +225,8 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
                     maxLength={30}
                     className="flex-1 rounded-lg border border-brass-600/30 bg-charcoal-900/80 px-3 py-2 text-sm text-[#f1e6d8] placeholder-[#6b625b] outline-none focus:border-amber-glow"
                   />
-                  <Button variant="primary" onClick={handleAddTheme} disabled={!themeLabel.trim()}>
-                    Ajouter
+                  <Button variant="primary" onClick={handleAddTheme} disabled={!themeLabel.trim()} title="Ajouter le thème">
+                    <Check size={16} />
                   </Button>
                 </div>
 
@@ -217,9 +240,10 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
                         <span className="font-display text-sm text-[#f1e6d8]">{theme.label}</span>
                         <button
                           onClick={() => dispatch({ type: 'REMOVE_THEME', index: i })}
-                          className="cursor-pointer text-xs text-burgundy-500 uppercase transition-colors hover:text-burgundy-500/70"
+                          title="Retirer ce thème"
+                          className="flex cursor-pointer items-center rounded-lg p-1.5 text-burgundy-500 transition-colors hover:bg-burgundy-500/10 hover:text-burgundy-400"
                         >
-                          Retirer
+                          <Trash2 size={13} />
                         </button>
                       </li>
                     ))}
@@ -245,7 +269,9 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
                   dispatch({ type: 'START_GAME' })
                 }}
               >
-                Lancer la partie
+                <span className="flex items-center justify-center gap-2">
+                  <Rocket size={16} /> Lancer la partie
+                </span>
               </Button>
             )}
           </div>
@@ -316,9 +342,10 @@ function PlayerCard({ player, isMe, canRemove, onRemove }: PlayerCardProps) {
       {canRemove && (
         <button
           onClick={onRemove}
-          className="mt-1 cursor-pointer text-[10px] tracking-wide text-burgundy-500 uppercase transition-colors hover:text-burgundy-500/70"
+          title="Retirer ce joueur"
+          className="flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1 text-[10px] text-burgundy-500 transition-colors hover:bg-burgundy-500/10 hover:text-burgundy-400"
         >
-          Retirer
+          <DoorOpen size={12} />
         </button>
       )}
     </div>

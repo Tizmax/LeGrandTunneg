@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { Timer, CheckCircle2, XCircle, SkipForward, Sparkles, TrendingUp, TrendingDown } from 'lucide-react'
 import type { GameAction } from '../game/gameReducer'
 import type { GameState } from '../game/types'
 import { joueurs, currentJoueur, currentJoueurIndex } from '../game/types'
@@ -106,7 +107,7 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
                 question à l'oral puis déclenche lui-même le chrono. */}
             {isPresenter && state.tunnelSubPhase === 'question-pending' && (
               <Button variant="gold" onClick={handleStartTimer}>
-                Lancer le chrono
+                <span className="flex items-center gap-2"><Timer size={16} /> Lancer le chrono</span>
               </Button>
             )}
 
@@ -122,13 +123,13 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
             {isPresenter && state.tunnelSubPhase === 'question' && (
               <>
                 <Button variant="primary" onClick={handleGoodAnswer}>
-                  Bonne réponse
+                  <span className="flex items-center gap-2"><CheckCircle2 size={16} /> Bonne réponse</span>
                 </Button>
                 <Button variant="danger" onClick={handleBadAnswer}>
-                  Mauvaise réponse
+                  <span className="flex items-center gap-2"><XCircle size={16} /> Mauvaise réponse</span>
                 </Button>
                 <Button variant="secondary" onClick={handlePass}>
-                  Passer
+                  <span className="flex items-center gap-2"><SkipForward size={16} /> Passer</span>
                 </Button>
               </>
             )}
@@ -148,7 +149,7 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
                 le choix n'est pas ouvert. */}
             {isPresenter && state.tunnelSubPhase === 'after-success-pending' && (
               <Button variant="gold" onClick={handleRevealChoice}>
-                Lancer le choix
+                <span className="flex items-center gap-2"><Sparkles size={16} /> Lancer le choix</span>
               </Button>
             )}
 
@@ -164,10 +165,10 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
             {isCurrentPlayer && state.tunnelSubPhase === 'after-success-open' && (
               <>
                 <Button variant="primary" onClick={() => dispatch({ type: 'CONTINUE' })}>
-                  Rester sur scène
+                  <span className="flex items-center gap-2"><TrendingUp size={16} /> Rester sur scène</span>
                 </Button>
                 <Button variant="gold" onClick={handleCoffrer}>
-                  Descendre
+                  <span className="flex items-center gap-2"><TrendingDown size={16} /> Descendre</span>
                 </Button>
               </>
             )}

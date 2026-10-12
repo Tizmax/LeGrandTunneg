@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { motion } from 'framer-motion'
+import { RotateCcw, Home } from 'lucide-react'
 import type { GameAction } from '../game/gameReducer'
 import type { GameState } from '../game/types'
 import { joueurs } from '../game/types'
@@ -118,10 +119,10 @@ export function EndScreen({ state, dispatch, role }: EndScreenProps) {
         {role === 'presentateur' && (
           <div className="animate-rise-up flex gap-4">
             <Button variant="secondary" onClick={() => dispatch({ type: 'RESET_GAME' })}>
-              Rejouer
+              <span className="flex items-center gap-2"><RotateCcw size={15} /> Rejouer</span>
             </Button>
             <Button variant="ghost" onClick={() => dispatch({ type: 'QUIT_TO_MENU' })}>
-              Retour au menu
+              <span className="flex items-center gap-2"><Home size={15} /> Menu</span>
             </Button>
           </div>
         )}
