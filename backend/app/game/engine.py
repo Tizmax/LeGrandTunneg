@@ -50,9 +50,13 @@ def _require_role(actor_role: Role, required: Role) -> None:
         )
 
 
-_ALLOWED_AVATARS: frozenset[str] = frozenset(
-    ["🎭", "🦊", "🐸", "🦁", "🐧", "🦄", "🐺", "🦋", "🐲", "👻", "🤖", "🎩", "🧙", "🎪", "🥷", "🦅"]
-)
+# IDs des avatars SVG embarqués dans frontend/public/avatars/{id}.svg
+# (DiceBear Lorelei, seeds fixes, licence CC0)
+_ALLOWED_AVATARS: frozenset[str] = frozenset([
+    "alice", "bob", "charlie", "diana", "edgar", "flora",
+    "gareth", "hannah", "ivan", "julia", "kevin", "luna",
+    "marco", "nina", "oscar", "petra",
+])
 
 
 def set_player_avatar(

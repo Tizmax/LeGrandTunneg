@@ -49,7 +49,7 @@ export type GameState = {
   // Nom d'affichage du Présentateur (n'apparaît jamais dans `players`, voir
   // docs/websocket-protocol.md) — null en mode styleguide/debug sans réseau.
   presentateurName: string | null
-  // Avatar emoji du Présentateur (géré dans Room.avatars côté serveur, pas dans players).
+  // ID d'avatar SVG du Présentateur (géré dans Room.avatars côté serveur, pas dans players).
   presentateurAvatar: string
   players: Player[]
   themes: Theme[]

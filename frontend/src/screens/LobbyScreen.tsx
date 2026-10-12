@@ -5,7 +5,7 @@ import type { Role } from '../net/types'
 import { ScreenShell } from '../components/ScreenShell'
 import { Button } from '../components/Button'
 import { ArtDecoCorner } from '../components/decor/ArtDecoCorner'
-import { AvatarPicker } from '../components/AvatarPicker'
+import { AvatarPicker, avatarUrl } from '../components/AvatarPicker'
 import { useAudio } from '../audio/AudioContext'
 
 type LobbyScreenProps = {
@@ -93,7 +93,11 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
               </span>
               <div className="mt-2 flex items-center gap-2">
                 {state.presentateurAvatar && (
-                  <span className="text-2xl">{state.presentateurAvatar}</span>
+                  <img
+                    src={avatarUrl(state.presentateurAvatar)}
+                    alt={state.presentateurAvatar}
+                    className="h-8 w-8 rounded-full object-cover"
+                  />
                 )}
                 <span className="text-xs tracking-[0.2em] text-[#9a8d7d] uppercase">
                   Présentateur :{' '}
@@ -129,7 +133,13 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
                     </>
                   ) : (
                     <>
-                      {myAvatar && <span className="text-2xl">{myAvatar}</span>}
+                      {myAvatar && (
+                        <img
+                          src={avatarUrl(myAvatar)}
+                          alt={myAvatar}
+                          className="h-8 w-8 rounded-full object-cover"
+                        />
+                      )}
                       <span className="text-xs tracking-wide text-[#9a8d7d] uppercase">
                         Vous êtes{' '}
                         <span className="text-[#f1e6d8] normal-case">{myDisplayName}</span>
@@ -170,9 +180,12 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
                     className="flex items-center justify-between rounded-lg border border-white/5 bg-charcoal-900/60 px-4 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
                   >
                     <div className="flex items-center gap-3">
-                      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-charcoal-800 text-xl">
-                        {player.avatar || '🎭'}
-                      </span>
+                      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-charcoal-800 overflow-hidden">
+                        {player.avatar
+                          ? <img src={avatarUrl(player.avatar)} alt={player.avatar} className="h-full w-full object-cover" />
+                          : <span className="text-xl text-[#7a6f63]">?</span>
+                        }
+                      </div>
                       <div className="flex flex-col">
                         <span className="font-display text-lg text-[#f1e6d8]">{player.name}</span>
                         {!player.connected && (
