@@ -1,5 +1,6 @@
 import type { GameAction } from '../game/gameReducer'
 import type { GameState } from '../game/types'
+import { joueurs, currentJoueur, currentJoueurIndex } from '../game/types'
 import type { Role } from '../net/types'
 import { ScreenShell } from '../components/ScreenShell'
 import { Button } from '../components/Button'
@@ -39,7 +40,7 @@ type SelectionScreenProps = {
  *   - Écran principal : grille en lecture seule, aucun contrôle.
  */
 export function SelectionScreen({ state, dispatch, role, localPlayerId }: SelectionScreenProps) {
-  const currentPlayer = state.players[state.currentPlayerIndex]
+  const currentPlayer = currentJoueur(state)
   const revealed = state.phase === 'selection'
   const isInteractive = revealed && role === 'joueur' && currentPlayer?.id === localPlayerId
   const { playEffect } = useAudio()
@@ -51,7 +52,7 @@ export function SelectionScreen({ state, dispatch, role, localPlayerId }: Select
           <h2 className="marquee-text font-display text-3xl font-bold sm:text-4xl">
             {currentPlayer?.name} monte sur scène
           </h2>
-          <ScoreBoard players={state.players} currentPlayerIndex={state.currentPlayerIndex} />
+          <ScoreBoard players={joueurs(state)} currentPlayerIndex={currentJoueurIndex(state)} />
           {!revealed && role === 'presentateur' && (
             <Button variant="gold" onClick={() => { playEffect('reveal'); dispatch({ type: 'REVEAL_CHOICE' }) }}>
               Lancer le choix

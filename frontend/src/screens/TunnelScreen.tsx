@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import type { GameAction } from '../game/gameReducer'
 import type { GameState } from '../game/types'
+import { joueurs, currentJoueur, currentJoueurIndex } from '../game/types'
 import type { Role } from '../net/types'
 import { ScreenShell } from '../components/ScreenShell'
 import { Button } from '../components/Button'
@@ -20,7 +21,7 @@ type TunnelScreenProps = {
 
 export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScreenProps) {
   const theme = state.activeThemeIndex !== null ? state.themes[state.activeThemeIndex] : null
-  const currentPlayer = state.players[state.currentPlayerIndex]
+  const currentPlayer = currentJoueur(state)
   const { playEffect } = useAudio()
 
   if (!theme) return null
@@ -82,7 +83,7 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
             <h2 className="marquee-text font-display text-3xl font-bold sm:text-4xl">
               {theme.label}
             </h2>
-            <ScoreBoard players={state.players} currentPlayerIndex={state.currentPlayerIndex} />
+            <ScoreBoard players={joueurs(state)} currentPlayerIndex={currentJoueurIndex(state)} />
           </div>
 
           <div className="animate-rise-up w-full">

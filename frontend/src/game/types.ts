@@ -59,3 +59,31 @@ export type GameState = {
   tunnelSubPhase: TunnelSubPhase | null
   history: HistoryEntry[]
 }
+
+/**
+ * Retourne uniquement les joueurs (sans le présentateur).
+ * À utiliser dans les écrans de jeu (ScoreBoard, podium, sélection…).
+ */
+export function joueurs(state: GameState): Player[] {
+  return state.players.filter((p) => !p.isPresenter)
+}
+
+/**
+ * Retourne le joueur actif (currentPlayerIndex dans state.players),
+ * ou null si l'index pointe sur le présentateur (ne devrait pas arriver
+ * en jeu normal, mais protège contre les états transitoires).
+ */
+export function currentJoueur(state: GameState): Player | null {
+  const p = state.players[state.currentPlayerIndex] ?? null
+  return p && !p.isPresenter ? p : null
+}
+
+/**
+ * Retourne l'index du joueur actif dans le tableau filtré joueurs(state),
+ * pour l'affichage dans ScoreBoard (qui n'inclut pas le présentateur).
+ */
+export function currentJoueurIndex(state: GameState): number {
+  const current = state.players[state.currentPlayerIndex]
+  if (!current || current.isPresenter) return 0
+  return joueurs(state).findIndex((p) => p.id === current.id)
+}

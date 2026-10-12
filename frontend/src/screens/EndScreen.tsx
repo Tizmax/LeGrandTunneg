@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { motion } from 'framer-motion'
 import type { GameAction } from '../game/gameReducer'
 import type { GameState } from '../game/types'
+import { joueurs } from '../game/types'
 import type { Role } from '../net/types'
 import { ScreenShell } from '../components/ScreenShell'
 import { Button } from '../components/Button'
@@ -30,7 +31,7 @@ function biggestSingleCoffrage(state: GameState) {
 }
 
 export function EndScreen({ state, dispatch, role }: EndScreenProps) {
-  const ranked = [...state.players].sort((a, b) => b.points - a.points)
+  const ranked = [...joueurs(state)].sort((a, b) => b.points - a.points)
   const { playEffect } = useAudio()
 
   // Fanfare de victoire au montage de l'écran final
