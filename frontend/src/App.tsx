@@ -19,6 +19,7 @@ import { ScreenShell } from './components/ScreenShell'
 import { GameControls } from './components/GameControls'
 import { CurtainClose } from './components/decor/CurtainClose'
 import { MuteButton } from './components/MuteButton'
+import { useAudio } from './audio/AudioContext'
 
 function renderScreen(
   phase: string,
@@ -159,6 +160,26 @@ function App() {
 
   const dispatch = createNetworkDispatch(connection.send)
   const { state, role, localPlayerId } = connection
+
+  // ── Ambiance jazz : gérée au niveau de l'App pour persister entre phases ──
+  // Jazz démarre dès selection-pending et tourne en continu (tunnel inclus).
+  // S'arrête uniquement quand on revient au lobby ou à l'écran de fin.
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const { startAmbient, stopAmbient } = useAudio()
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  useEffect(() => {
+    const gamePhase = state.phase
+    if (gamePhase === 'lobby') {
+      stopAmbient()
+    } else if (gamePhase === 'selection-pending' || gamePhase === 'selection' || gamePhase === 'tunnel') {
+      startAmbient('jazz')
+    } else if (gamePhase === 'end') {
+      stopAmbient()
+    }
+  // On ne veut relancer l'ambiance QUE sur les changements de phase clés,
+  // pas à chaque re-render. startAmbient/stopAmbient sont stables (useCallback).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.phase])
 
   // Un Joueur quitte SA partie individuellement : ferme sa propre connexion
   // et efface son identité locale pour revenir à l'accueil (il peut

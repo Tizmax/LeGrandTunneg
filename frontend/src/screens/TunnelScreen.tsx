@@ -21,7 +21,7 @@ type TunnelScreenProps = {
 export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScreenProps) {
   const theme = state.activeThemeIndex !== null ? state.themes[state.activeThemeIndex] : null
   const currentPlayer = state.players[state.currentPlayerIndex]
-  const { playEffect, startAmbient, stopAmbient } = useAudio()
+  const { playEffect } = useAudio()
 
   if (!theme) return null
 
@@ -30,16 +30,6 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
   // joueur ne reçoit que le message d'attente ci-dessous (le serveur
   // rejetterait de toute façon avec `not_your_turn`).
   const isCurrentPlayer = role === 'joueur' && currentPlayer?.id === localPlayerId
-
-  // ── Musique d'ambiance jazz : démarre à l'entrée dans le tunnel ───────────
-  // On utilise activeThemeIndex comme dépendance pour relancer la musique
-  // à chaque nouveau thème (key différente => composant remonté => effet rejoué).
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  useEffect(() => {
-    startAmbient('jazz')
-    return () => stopAmbient()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.activeThemeIndex])
 
   // ── Son d'entrée dans le tunnel (accent dramatique) ───────────────────────
   // eslint-disable-next-line react-hooks/rules-of-hooks

@@ -5,6 +5,7 @@ import type { Role } from '../net/types'
 import { ScreenShell } from '../components/ScreenShell'
 import { Button } from '../components/Button'
 import { ArtDecoCorner } from '../components/decor/ArtDecoCorner'
+import { useAudio } from '../audio/AudioContext'
 
 type LobbyScreenProps = {
   state: GameState
@@ -34,6 +35,7 @@ type LobbyScreenProps = {
 export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: LobbyScreenProps) {
   const isPresenter = role === 'presentateur'
   const canStart = state.players.length >= 2 && state.themes.length >= 1
+  const { playEffect } = useAudio()
 
   const [editingSelf, setEditingSelf] = useState(false)
   const [nameDraft, setNameDraft] = useState('')
@@ -232,7 +234,10 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
             variant="gold"
             className="animate-rise-up px-10 py-3 text-base"
             disabled={!canStart}
-            onClick={() => dispatch({ type: 'START_GAME' })}
+            onClick={() => {
+              playEffect('theme_start')
+              dispatch({ type: 'START_GAME' })
+            }}
           >
             Lancer la partie
           </Button>

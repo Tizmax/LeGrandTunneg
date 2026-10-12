@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { motion } from 'framer-motion'
 import type { GameAction } from '../game/gameReducer'
 import type { GameState } from '../game/types'
@@ -5,6 +6,7 @@ import type { Role } from '../net/types'
 import { ScreenShell } from '../components/ScreenShell'
 import { Button } from '../components/Button'
 import { ArtDecoCorner } from '../components/decor/ArtDecoCorner'
+import { useAudio } from '../audio/AudioContext'
 
 type EndScreenProps = {
   state: GameState
@@ -29,6 +31,13 @@ function biggestSingleCoffrage(state: GameState) {
 
 export function EndScreen({ state, dispatch, role }: EndScreenProps) {
   const ranked = [...state.players].sort((a, b) => b.points - a.points)
+  const { playEffect } = useAudio()
+
+  // Fanfare de victoire au montage de l'écran final
+  useEffect(() => {
+    playEffect('coffrage')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const podium = ranked.slice(0, 3)
   // Reorder visually: 2nd, 1st, 3rd for classic podium look
   const visualOrder =

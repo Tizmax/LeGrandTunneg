@@ -6,6 +6,7 @@ import { Button } from '../components/Button'
 import { ScoreBoard } from '../components/ScoreBoard'
 import { MiniProgressBar } from '../components/MiniProgressBar'
 import { ArtDecoCorner } from '../components/decor/ArtDecoCorner'
+import { useAudio } from '../audio/AudioContext'
 
 type SelectionScreenProps = {
   state: GameState
@@ -41,6 +42,7 @@ export function SelectionScreen({ state, dispatch, role, localPlayerId }: Select
   const currentPlayer = state.players[state.currentPlayerIndex]
   const revealed = state.phase === 'selection'
   const isInteractive = revealed && role === 'joueur' && currentPlayer?.id === localPlayerId
+  const { playEffect } = useAudio()
 
   return (
     <ScreenShell>
@@ -51,7 +53,7 @@ export function SelectionScreen({ state, dispatch, role, localPlayerId }: Select
           </h2>
           <ScoreBoard players={state.players} currentPlayerIndex={state.currentPlayerIndex} />
           {!revealed && role === 'presentateur' && (
-            <Button variant="gold" onClick={() => dispatch({ type: 'REVEAL_CHOICE' })}>
+            <Button variant="gold" onClick={() => { playEffect('reveal'); dispatch({ type: 'REVEAL_CHOICE' }) }}>
               Lancer le choix
             </Button>
           )}
@@ -106,7 +108,7 @@ export function SelectionScreen({ state, dispatch, role, localPlayerId }: Select
               <button
                 key={i}
                 disabled={disabled}
-                onClick={() => dispatch({ type: 'SELECT_THEME', index: i })}
+                onClick={() => { playEffect('theme_start'); dispatch({ type: 'SELECT_THEME', index: i }) }}
                 className={className}
               >
                 {content}
