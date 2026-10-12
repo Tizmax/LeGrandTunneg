@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import type { GameAction } from '../game/gameReducer'
 import type { GameState } from '../game/types'
 import type { Role } from '../net/types'
@@ -8,6 +9,7 @@ import { Tunnel } from '../components/Tunnel'
 import { CountdownTimer } from '../components/CountdownTimer'
 import { CurtainReveal } from '../components/decor/CurtainReveal'
 import { RoomOverview } from '../components/RoomOverview'
+import { useAudio } from '../audio/AudioContext'
 
 type TunnelScreenProps = {
   state: GameState
@@ -19,6 +21,7 @@ type TunnelScreenProps = {
 export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScreenProps) {
   const theme = state.activeThemeIndex !== null ? state.themes[state.activeThemeIndex] : null
   const currentPlayer = state.players[state.currentPlayerIndex]
+  const { playEffect, startAmbient, stopAmbient } = useAudio()
 
   if (!theme) return null
 
@@ -27,6 +30,55 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
   // joueur ne reçoit que le message d'attente ci-dessous (le serveur
   // rejetterait de toute façon avec `not_your_turn`).
   const isCurrentPlayer = role === 'joueur' && currentPlayer?.id === localPlayerId
+
+  // ── Musique d'ambiance jazz : démarre à l'entrée dans le tunnel ───────────
+  // On utilise activeThemeIndex comme dépendance pour relancer la musique
+  // à chaque nouveau thème (key différente => composant remonté => effet rejoué).
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  useEffect(() => {
+    startAmbient('jazz')
+    return () => stopAmbient()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.activeThemeIndex])
+
+  // ── Son d'entrée dans le tunnel (accent dramatique) ───────────────────────
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  useEffect(() => {
+    playEffect('theme_start')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.activeThemeIndex])
+
+  // ─── Wrappers dispatch avec effets sonores ─────────────────────────────────
+
+  function handleStartTimer() {
+    playEffect('timer_start')
+    dispatch({ type: 'START_TIMER' })
+  }
+
+  function handleGoodAnswer() {
+    playEffect('good_answer')
+    dispatch({ type: 'GOOD_ANSWER' })
+  }
+
+  function handleBadAnswer() {
+    playEffect('bad_answer')
+    dispatch({ type: 'BAD_ANSWER' })
+  }
+
+  function handlePass() {
+    playEffect('pass')
+    dispatch({ type: 'PASS' })
+  }
+
+  function handleRevealChoice() {
+    playEffect('reveal')
+    dispatch({ type: 'REVEAL_CHOICE' })
+  }
+
+  function handleCoffrer() {
+    playEffect('coffrage')
+    dispatch({ type: 'COFFRER' })
+  }
 
   return (
     <ScreenShell spotlight smoke>
@@ -62,7 +114,7 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
             {/* Couche show : question-pending — le Présentateur pose sa
                 question à l'oral puis déclenche lui-même le chrono. */}
             {isPresenter && state.tunnelSubPhase === 'question-pending' && (
-              <Button variant="gold" onClick={() => dispatch({ type: 'START_TIMER' })}>
+              <Button variant="gold" onClick={handleStartTimer}>
                 Lancer le chrono
               </Button>
             )}
@@ -78,13 +130,13 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
                 réponse) — jamais visible côté Joueur ni Écran principal. */}
             {isPresenter && state.tunnelSubPhase === 'question' && (
               <>
-                <Button variant="primary" onClick={() => dispatch({ type: 'GOOD_ANSWER' })}>
+                <Button variant="primary" onClick={handleGoodAnswer}>
                   Bonne réponse
                 </Button>
-                <Button variant="danger" onClick={() => dispatch({ type: 'BAD_ANSWER' })}>
+                <Button variant="danger" onClick={handleBadAnswer}>
                   Mauvaise réponse
                 </Button>
-                <Button variant="secondary" onClick={() => dispatch({ type: 'PASS' })}>
+                <Button variant="secondary" onClick={handlePass}>
                   Passer
                 </Button>
               </>
@@ -104,7 +156,7 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
                 boutons Rester sur scène/Descendre restent masqués tant que
                 le choix n'est pas ouvert. */}
             {isPresenter && state.tunnelSubPhase === 'after-success-pending' && (
-              <Button variant="gold" onClick={() => dispatch({ type: 'REVEAL_CHOICE' })}>
+              <Button variant="gold" onClick={handleRevealChoice}>
                 Lancer le choix
               </Button>
             )}
@@ -123,7 +175,7 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
                 <Button variant="primary" onClick={() => dispatch({ type: 'CONTINUE' })}>
                   Rester sur scène
                 </Button>
-                <Button variant="gold" onClick={() => dispatch({ type: 'COFFRER' })}>
+                <Button variant="gold" onClick={handleCoffrer}>
                   Descendre
                 </Button>
               </>

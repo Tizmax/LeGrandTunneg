@@ -18,6 +18,7 @@ import { StyleguideScreen } from './screens/StyleguideScreen'
 import { ScreenShell } from './components/ScreenShell'
 import { GameControls } from './components/GameControls'
 import { CurtainClose } from './components/decor/CurtainClose'
+import { MuteButton } from './components/MuteButton'
 
 function renderScreen(
   phase: string,
@@ -177,6 +178,8 @@ function App() {
         <GameControls dispatch={dispatch} role={role} onLeave={handleLeave} />
       )}
       <TunnelExitCurtain phase={state.phase} />
+      {/* Bouton mute flottant — visible sur tous les écrans de jeu */}
+      <MuteButton />
       {/* Balayage lumineux théâtral à chaque changement d'écran, façon rideau qui se lève */}
       <AnimatePresence mode="wait">
         <motion.div
