@@ -51,6 +51,9 @@ class Player:
     # qu'il est absent, et il reprend sa place s'il se reconnecte (voir
     # app.game.engine.mark_player_connected). Toujours True par défaut.
     connected: bool = True
+    # Identifiant de l'icône de personnage choisie par le joueur dans le
+    # lobby (ex. "🎭", "🦊", etc.). Vide par défaut (pas encore choisi).
+    avatar: str = ""
 
 
 @dataclass(frozen=True)

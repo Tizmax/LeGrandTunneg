@@ -10,20 +10,24 @@ from .types import GameState
 
 
 def serialize_state(
-    state: GameState, presentateur_name: str | None = None
+    state: GameState,
+    presentateur_name: str | None = None,
+    presentateur_avatar: str = "",
 ) -> dict[str, Any]:
-    """`presentateur_name` vient de `app.rooms.manager.Room.names` (le
-    Présentateur n'apparaît jamais dans `state.players`, voir
-    docs/websocket-protocol.md) — permet d'afficher son nom côté client."""
+    """`presentateur_name` et `presentateur_avatar` viennent de
+    `app.rooms.manager.Room` (le Présentateur n'apparaît jamais dans
+    `state.players`, voir docs/websocket-protocol.md)."""
     return {
         "phase": state.phase,
         "presentateurName": presentateur_name,
+        "presentateurAvatar": presentateur_avatar,
         "players": [
             {
                 "id": p.id,
                 "name": p.name,
                 "points": p.points,
                 "connected": p.connected,
+                "avatar": p.avatar,
             }
             for p in state.players
         ],

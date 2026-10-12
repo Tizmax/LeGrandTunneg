@@ -5,6 +5,7 @@ import type { Role } from '../net/types'
 import { ScreenShell } from '../components/ScreenShell'
 import { Button } from '../components/Button'
 import { ArtDecoCorner } from '../components/decor/ArtDecoCorner'
+import { AvatarPicker } from '../components/AvatarPicker'
 import { useAudio } from '../audio/AudioContext'
 
 type LobbyScreenProps = {
@@ -16,21 +17,9 @@ type LobbyScreenProps = {
 }
 
 /**
- * Lobby unique (fusion 2026-10-11 des anciens écrans MenuScreen + ThemesScreen,
- * voir retour utilisateur : "je veux qu'on ait un lobby où tout gérer qui
- * soit le même lobby où on attend les joueurs, qu'on puisse y changer son
- * nom, y rentrer les thèmes pour le présentateur, il faudrait aussi qu'on
- * voie le nom du présentateur").
- *
- * - Affiche le code de room + le nom du Présentateur (état `presentateurName`,
- *   absent de `players` — voir docs/websocket-protocol.md).
- * - Chacun peut renommer UNIQUEMENT lui-même (joueur ou Présentateur),
- *   seulement tant que `phase === 'lobby'` (voir app/game/engine.py
- *   `rename_player` + `app/rooms/manager.py` `rename_participant`).
- * - La saisie des thèmes (à l'aveugle) reste réservée au Présentateur, mais
- *   vit désormais sur le même écran que l'attente des joueurs.
- * - `game:start` requiert >=2 joueurs ET >=1 thème (fusion des deux anciennes
- *   préconditions de GO_TO_THEMES et START_GAME).
+ * Lobby unique (fusion 2026-10-11 des anciens écrans MenuScreen + ThemesScreen).
+ * Ajout 2026-10-12 : chaque participant (joueur et Présentateur) peut choisir
+ * son icône de personnage parmi 16 emojis dans le lobby.
  */
 export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: LobbyScreenProps) {
   const isPresenter = role === 'presentateur'
@@ -40,9 +29,11 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
   const [editingSelf, setEditingSelf] = useState(false)
   const [nameDraft, setNameDraft] = useState('')
   const [themeLabel, setThemeLabel] = useState('')
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false)
 
   const myPlayer = role === 'joueur' ? state.players.find((p) => p.id === localPlayerId) : undefined
   const myDisplayName = isPresenter ? state.presentateurName : (myPlayer?.name ?? null)
+  const myAvatar = isPresenter ? state.presentateurAvatar : (myPlayer?.avatar ?? '')
   const canRenameSelf = isPresenter || Boolean(myPlayer)
 
   function startEditingSelf() {
@@ -54,6 +45,11 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
     const trimmed = nameDraft.trim()
     if (trimmed) dispatch({ type: 'RENAME_SELF', name: trimmed })
     setEditingSelf(false)
+  }
+
+  function handleSelectAvatar(avatar: string) {
+    dispatch({ type: 'SET_AVATAR', avatar })
+    setShowAvatarPicker(false)
   }
 
   function handleAddTheme() {
@@ -87,7 +83,7 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
             <ArtDecoCorner position="bottom-left" />
             <ArtDecoCorner position="bottom-right" />
 
-            {/* Code de room + nom du Présentateur */}
+            {/* Code de room + Présentateur avec avatar */}
             <div className="mb-5 flex flex-col items-center gap-1">
               <span className="text-xs tracking-[0.3em] text-[#9a8d7d] uppercase">
                 Code de la room
@@ -95,53 +91,77 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
               <span className="font-display text-3xl font-black tracking-[0.3em] text-amber-glow">
                 {roomCode}
               </span>
-              <span className="mt-2 text-xs tracking-[0.2em] text-[#9a8d7d] uppercase">
-                Présentateur :{' '}
-                <span className="text-[#f1e6d8] normal-case">
-                  {state.presentateurName ?? '…'}
+              <div className="mt-2 flex items-center gap-2">
+                {state.presentateurAvatar && (
+                  <span className="text-2xl">{state.presentateurAvatar}</span>
+                )}
+                <span className="text-xs tracking-[0.2em] text-[#9a8d7d] uppercase">
+                  Présentateur :{' '}
+                  <span className="text-[#f1e6d8] normal-case">
+                    {state.presentateurName ?? '…'}
+                  </span>
                 </span>
-              </span>
+              </div>
             </div>
 
-            {/* Renommage de soi (Présentateur ou joueur) */}
+            {/* Identité de soi : renommage + choix avatar */}
             {canRenameSelf && (
-              <div className="mb-5 flex items-center justify-center gap-2 border-b border-white/5 pb-4">
-                {editingSelf ? (
-                  <>
-                    <input
-                      type="text"
-                      value={nameDraft}
-                      autoFocus
-                      onChange={(e) => setNameDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') confirmRename()
-                        if (e.key === 'Escape') setEditingSelf(false)
-                      }}
-                      maxLength={24}
-                      className="flex-1 rounded-lg border border-brass-600/30 bg-charcoal-900/80 px-3 py-1.5 text-sm text-[#f1e6d8] outline-none focus:border-amber-glow"
-                    />
-                    <Button variant="primary" className="px-3 py-1.5 text-xs" onClick={confirmRename}>
-                      Valider
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <span className="text-xs tracking-wide text-[#9a8d7d] uppercase">
-                      Vous êtes{' '}
-                      <span className="text-[#f1e6d8] normal-case">{myDisplayName}</span>
-                    </span>
-                    <button
-                      onClick={startEditingSelf}
-                      className="cursor-pointer text-xs tracking-wide text-amber-glow uppercase transition-colors hover:text-amber-ember"
-                    >
-                      Changer mon nom
-                    </button>
-                  </>
-                )}
+              <div className="mb-5 flex flex-col gap-3 border-b border-white/5 pb-4">
+                {/* Ligne pseudo */}
+                <div className="flex items-center justify-center gap-2">
+                  {editingSelf ? (
+                    <>
+                      <input
+                        type="text"
+                        value={nameDraft}
+                        autoFocus
+                        onChange={(e) => setNameDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') confirmRename()
+                          if (e.key === 'Escape') setEditingSelf(false)
+                        }}
+                        maxLength={24}
+                        className="flex-1 rounded-lg border border-brass-600/30 bg-charcoal-900/80 px-3 py-1.5 text-sm text-[#f1e6d8] outline-none focus:border-amber-glow"
+                      />
+                      <Button variant="primary" className="px-3 py-1.5 text-xs" onClick={confirmRename}>
+                        Valider
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      {myAvatar && <span className="text-2xl">{myAvatar}</span>}
+                      <span className="text-xs tracking-wide text-[#9a8d7d] uppercase">
+                        Vous êtes{' '}
+                        <span className="text-[#f1e6d8] normal-case">{myDisplayName}</span>
+                      </span>
+                      <button
+                        onClick={startEditingSelf}
+                        className="cursor-pointer text-xs tracking-wide text-amber-glow uppercase transition-colors hover:text-amber-ember"
+                      >
+                        Changer
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {/* Sélecteur d'avatar */}
+                <div className="flex flex-col items-center gap-2">
+                  <button
+                    onClick={() => setShowAvatarPicker((v) => !v)}
+                    className="text-xs tracking-wide text-amber-glow uppercase transition-colors hover:text-amber-ember"
+                  >
+                    {showAvatarPicker ? 'Fermer le choix' : (myAvatar ? 'Changer mon icône' : 'Choisir mon icône')}
+                  </button>
+                  {showAvatarPicker && (
+                    <div className="w-full rounded-xl border border-brass-600/20 bg-charcoal-900/80 p-3">
+                      <AvatarPicker selected={myAvatar} onSelect={handleSelectAvatar} />
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
-            {/* Liste des joueurs */}
+            {/* Liste des joueurs avec leurs avatars */}
             {state.players.length > 0 ? (
               <ul className="flex flex-col gap-2">
                 {state.players.map((player, i) => (
@@ -149,7 +169,17 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
                     key={player.id}
                     className="flex items-center justify-between rounded-lg border border-white/5 bg-charcoal-900/60 px-4 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
                   >
-                    <span className="font-display text-lg text-[#f1e6d8]">{player.name}</span>
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-charcoal-800 text-xl">
+                        {player.avatar || '🎭'}
+                      </span>
+                      <div className="flex flex-col">
+                        <span className="font-display text-lg text-[#f1e6d8]">{player.name}</span>
+                        {!player.connected && (
+                          <span className="text-xs text-[#7a6f63]">déconnecté</span>
+                        )}
+                      </div>
+                    </div>
                     {isPresenter && (
                       <button
                         onClick={() => dispatch({ type: 'REMOVE_PLAYER', index: i })}
@@ -176,9 +206,7 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
 
         </div>
 
-        {/* Panneau des thèmes — visible UNIQUEMENT par le Présentateur.
-            Sur grand écran : fixé à droite pour laisser la carte principale centrée.
-            Sur mobile : dans le flux normal sous la carte principale. */}
+        {/* Panneau des thèmes — visible UNIQUEMENT par le Présentateur. */}
         {isPresenter && (
           <div className="animate-rise-up lg:fixed lg:right-4 lg:top-1/2 lg:-translate-y-1/2 w-full max-w-md lg:w-64 lg:max-w-none rounded-2xl border border-brass-600/30 bg-gradient-to-b from-charcoal-800 to-charcoal-900 p-5 shadow-stage-lg">
             <p className="mb-3 text-center text-xs tracking-[0.4em] text-brass-400/80 uppercase">

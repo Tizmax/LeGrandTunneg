@@ -35,6 +35,7 @@ async def _send_state_sync(
     local_player_id: str,
     state: GameState,
     presentateur_name: str | None,
+    presentateur_avatar: str = "",
 ) -> None:
     await websocket.send_json(
         {
@@ -43,7 +44,7 @@ async def _send_state_sync(
                 "code": code,
                 "role": role,
                 "localPlayerId": local_player_id,
-                "state": serialize_state(state, presentateur_name),
+                "state": serialize_state(state, presentateur_name, presentateur_avatar),
             },
         }
     )
@@ -197,7 +198,8 @@ async def websocket_endpoint(websocket: WebSocket, code: str, local_player_id: s
             await _broadcast_state(code)
 
     await _send_state_sync(
-        websocket, code, role, local_player_id, room.state, room.presentateur_name
+        websocket, code, role, local_player_id, room.state,
+        room.presentateur_name, room.presentateur_avatar,
     )
 
     try:
@@ -232,6 +234,35 @@ async def websocket_endpoint(websocket: WebSocket, code: str, local_player_id: s
                         continue
                     except (ValueError, UnknownParticipantError) as exc:
                         await _send_error(websocket, "invalid_payload", str(exc))
+                        continue
+                    await _broadcast_state(code)
+                continue
+
+            if msg_type == "player:set_avatar":
+                # Joueur : avatar via engine (mute state.players).
+                # Présentateur/Écran principal : avatar stocké dans Room.avatars.
+                avatar = payload.get("avatar", "")
+                async with room.lock:
+                    try:
+                        if role == "joueur":
+                            room.state = engine.set_player_avatar(
+                                room.state, role, local_player_id, avatar
+                            )
+                        else:
+                            # Présentateur peut changer son avatar en lobby
+                            if room.state.phase != "lobby":
+                                raise engine.GameError(
+                                    "invalid_phase",
+                                    "L'avatar ne peut être changé qu'en lobby.",
+                                )
+                            if avatar not in engine._ALLOWED_AVATARS:
+                                raise engine.GameError(
+                                    "invalid_payload",
+                                    f"Avatar non autorisé : {avatar!r}",
+                                )
+                            room.avatars[local_player_id] = avatar
+                    except engine.GameError as exc:
+                        await _send_error(websocket, exc.code, exc.message)
                         continue
                     await _broadcast_state(code)
                 continue

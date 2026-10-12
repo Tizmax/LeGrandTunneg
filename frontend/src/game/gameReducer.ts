@@ -8,6 +8,9 @@ export type GameAction =
   // net/dispatchAdapter.ts et net/useRoomConnection.ts pour le routage
   // réseau selon le rôle — présentateur/écran n'ont pas d'entrée players).
   | { type: 'RENAME_SELF'; name: string }
+  // Chaque participant choisit son avatar emoji dans le lobby (joueur via
+  // engine, présentateur via Room.avatars — routé par dispatchAdapter).
+  | { type: 'SET_AVATAR'; avatar: string }
   | { type: 'ADD_THEME'; label: string }
   | { type: 'REMOVE_THEME'; index: number }
   | { type: 'START_GAME' }
@@ -36,6 +39,7 @@ export type GameAction =
 export const initialState: GameState = {
   phase: 'lobby',
   presentateurName: null,
+  presentateurAvatar: '',
   players: [],
   themes: [],
   currentPlayerIndex: 0,
@@ -70,7 +74,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto
         ? crypto.randomUUID()
         : `local-${Date.now()}-${Math.random().toString(36).slice(2)}`
-      return { ...state, players: [...state.players, { id, name, points: 0, connected: true }] }
+      return { ...state, players: [...state.players, { id, name, points: 0, connected: true, avatar: '' }] }
     }
 
     case 'REMOVE_PLAYER': {
@@ -81,6 +85,13 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
     }
 
     case 'RENAME_SELF': {
+      // Reducer local (styleguide/solo) : pas de notion de "self" distincte,
+      // ce cas n'est pas exercé en pratique hors du mode réseau — voir
+      // net/dispatchAdapter.ts pour le vrai routage par rôle.
+      return state
+    }
+
+    case 'SET_AVATAR': {
       // Reducer local (styleguide/solo) : pas de notion de "self" distincte,
       // ce cas n'est pas exercé en pratique hors du mode réseau — voir
       // net/dispatchAdapter.ts pour le vrai routage par rôle.

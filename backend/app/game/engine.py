@@ -50,6 +50,28 @@ def _require_role(actor_role: Role, required: Role) -> None:
         )
 
 
+_ALLOWED_AVATARS: frozenset[str] = frozenset(
+    ["🎭", "🦊", "🐸", "🦁", "🐧", "🦄", "🐺", "🦋", "🐲", "👻", "🤖", "🎩", "🧙", "🎪", "🥷", "🦅"]
+)
+
+
+def set_player_avatar(
+    state: GameState, actor_role: Role, actor_player_id: str, avatar: str
+) -> GameState:
+    """Change l'avatar d'un joueur (seulement en lobby, par le joueur lui-même).
+    Le Présentateur gère son avatar via Room.avatars (hors engine)."""
+    _require_role(actor_role, "joueur")
+    if state.phase != "lobby":
+        raise GameError("invalid_phase", "L'avatar ne peut être changé qu'en lobby.")
+    if avatar not in _ALLOWED_AVATARS:
+        raise GameError("invalid_payload", f"Avatar non autorisé : {avatar!r}")
+    new_players = tuple(
+        replace(p, avatar=avatar) if p.id == actor_player_id else p
+        for p in state.players
+    )
+    return replace(state, players=new_players)
+
+
 def _require_current_player(
     state: GameState, actor_role: Role, actor_player_id: str
 ) -> None:

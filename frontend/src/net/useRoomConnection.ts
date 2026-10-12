@@ -34,6 +34,7 @@ export type OutgoingMessage =
   | { type: 'theme:remove'; payload: { index: number } }
   | { type: 'player:remove'; payload: { index: number } }
   | { type: 'player:rename'; payload: { name: string } }
+  | { type: 'player:set_avatar'; payload: { avatar: string } }
   | { type: 'game:start'; payload: Record<string, never> }
   | { type: 'choice:reveal'; payload: Record<string, never> }
   | { type: 'theme:select'; payload: { index: number } }

@@ -51,6 +51,10 @@ class Room:
     # local_player_id -> pseudo d'affichage (y compris pour presentateur/écran,
     # qui n'apparaissent jamais dans state.players)
     names: dict[str, str] = field(default_factory=dict)
+    # local_player_id -> avatar emoji choisi dans le lobby (tous rôles).
+    # Les joueurs ont aussi leur avatar dans state.players.avatar (via engine),
+    # mais le Présentateur/Écran principal n'ont d'entrée que dans cette table.
+    avatars: dict[str, str] = field(default_factory=dict)
     # local_player_id -> connexion WS active (une seule par participant)
     connections: dict[str, "WebSocket"] = field(default_factory=dict)
     presentateur_id: str | None = None
@@ -66,6 +70,12 @@ class Room:
         if self.presentateur_id is None:
             return None
         return self.names.get(self.presentateur_id)
+
+    @property
+    def presentateur_avatar(self) -> str:
+        if self.presentateur_id is None:
+            return ""
+        return self.avatars.get(self.presentateur_id, "")
 
 
 class RoomManager:
@@ -189,6 +199,7 @@ class RoomManager:
             return
         stale: list[str] = []
         presentateur_name = room.presentateur_name
+        presentateur_avatar = room.presentateur_avatar
         for local_player_id, conn in list(room.connections.items()):
             role = room.roles.get(local_player_id)
             if role is None:
@@ -201,7 +212,9 @@ class RoomManager:
                             "code": code,
                             "role": role,
                             "localPlayerId": local_player_id,
-                            "state": serialize_state(room.state, presentateur_name),
+                            "state": serialize_state(
+                                room.state, presentateur_name, presentateur_avatar
+                            ),
                         },
                     }
                 )

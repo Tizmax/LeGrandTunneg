@@ -25,6 +25,9 @@ export function createNetworkDispatch(send: (message: OutgoingMessage) => void) 
       case 'RENAME_SELF':
         send({ type: 'player:rename', payload: { name: action.name } })
         return
+      case 'SET_AVATAR':
+        send({ type: 'player:set_avatar', payload: { avatar: action.avatar } })
+        return
       case 'ADD_THEME':
         send({ type: 'theme:add', payload: { label: action.label } })
         return
