@@ -92,17 +92,39 @@ function App() {
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('debug') === 'styleguide'
 
+  if (isStyleguide) {
+    return (
+      <StyleguideScreen
+        dispatch={(action) => {
+          if (action.type === 'QUIT_TO_MENU') {
+            window.location.href = window.location.pathname
+          }
+        }}
+      />
+    )
+  }
+
+  return <AppConnected />
+}
+
+/**
+ * Sous-composant monté uniquement hors mode styleguide.
+ * Tous les hooks (useRoomConnection, useAudio, useEffect…) sont appelés de
+ * façon inconditionnelle ici — React error #310 corrigé (les hooks étaient
+ * auparavant appelés après des `return` conditionnels dans App).
+ */
+function AppConnected() {
   // Identité de connexion (code de room + local_player_id) + message
   // d'erreur éventuel à afficher sur l'accueil, regroupés dans un seul état
   // pour n'avoir qu'une seule mutation par transition. null tant que
   // l'utilisateur n'a pas créé/rejoint de room via AccueilScreen, ou après un
   // room:closed / reconnexion impossible.
   const [session, setSession] = useState<{ identity: Identity | null; connectError: string | null }>(
-    () => ({ identity: isStyleguide ? null : loadStoredIdentity(), connectError: null }),
+    () => ({ identity: loadStoredIdentity(), connectError: null }),
   )
   const { identity, connectError } = session
 
-  const connection = useRoomConnection(isStyleguide ? null : identity)
+  const connection = useRoomConnection(identity)
 
   const handleConnected = useCallback((newIdentity: Identity) => {
     storeIdentity(newIdentity)
@@ -130,19 +152,24 @@ function App() {
     }
   }, [connection.status, identity])
 
-  if (isStyleguide) {
-    // Pas de connexion réseau ici : bouton "Retour au menu" de la demo
-    // ramène simplement sur l'accueil (hors scope du design system).
-    return (
-      <StyleguideScreen
-        dispatch={(action) => {
-          if (action.type === 'QUIT_TO_MENU') {
-            window.location.href = window.location.pathname
-          }
-        }}
-      />
-    )
-  }
+  // ── Ambiance jazz : gérée au niveau de l'App pour persister entre phases ──
+  // Jazz démarre dès selection-pending et tourne en continu (tunnel inclus).
+  // S'arrête uniquement quand on revient au lobby ou à l'écran de fin.
+  // Tous les hooks sont appelés inconditionnellement (règle des hooks React).
+  const { startAmbient, stopAmbient } = useAudio()
+  const phase = connection.state.phase
+  useEffect(() => {
+    if (phase === 'lobby') {
+      stopAmbient()
+    } else if (phase === 'selection-pending' || phase === 'selection' || phase === 'tunnel') {
+      startAmbient('jazz')
+    } else if (phase === 'end') {
+      stopAmbient()
+    }
+  // On ne veut relancer l'ambiance QUE sur les changements de phase clés,
+  // pas à chaque re-render. startAmbient/stopAmbient sont stables (useCallback).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase])
 
   // Aucune identité connue (ni fournie, ni retrouvée en localStorage) ->
   // écran d'accueil pour créer/rejoindre une room.
@@ -161,30 +188,10 @@ function App() {
   const dispatch = createNetworkDispatch(connection.send)
   const { state, role, localPlayerId } = connection
 
-  // ── Ambiance jazz : gérée au niveau de l'App pour persister entre phases ──
-  // Jazz démarre dès selection-pending et tourne en continu (tunnel inclus).
-  // S'arrête uniquement quand on revient au lobby ou à l'écran de fin.
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  const { startAmbient, stopAmbient } = useAudio()
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  useEffect(() => {
-    const gamePhase = state.phase
-    if (gamePhase === 'lobby') {
-      stopAmbient()
-    } else if (gamePhase === 'selection-pending' || gamePhase === 'selection' || gamePhase === 'tunnel') {
-      startAmbient('jazz')
-    } else if (gamePhase === 'end') {
-      stopAmbient()
-    }
-  // On ne veut relancer l'ambiance QUE sur les changements de phase clés,
-  // pas à chaque re-render. startAmbient/stopAmbient sont stables (useCallback).
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.phase])
-
   // Un Joueur quitte SA partie individuellement : ferme sa propre connexion
   // et efface son identité locale pour revenir à l'accueil (il peut
   // rejoindre à nouveau la même room plus tard avec le code). Les autres
-  // participants le voient simplement marqué absent côté serveur — contraste
+  // participants le voient simplement marqués absents côté serveur — contraste
   // avec "Terminer la partie" (END_GAME_EARLY) qui est une action du
   // Présentateur affectant toute la room sans déconnecter personne.
   function handleLeave() {
