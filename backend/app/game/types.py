@@ -51,9 +51,12 @@ class Player:
     # qu'il est absent, et il reprend sa place s'il se reconnecte (voir
     # app.game.engine.mark_player_connected). Toujours True par défaut.
     connected: bool = True
-    # Identifiant de l'icône de personnage choisie par le joueur dans le
-    # lobby (ex. "🎭", "🦊", etc.). Vide par défaut (pas encore choisi).
+    # Identifiant de l'icône de personnage SVG choisie dans le lobby.
+    # Ex. "alice", "bob", etc. Toujours assigné au join (tirage aléatoire).
     avatar: str = ""
+    # True pour le Présentateur — il apparaît dans players[] comme tout le
+    # monde mais a des droits étendus (animer la partie). Un seul par room.
+    is_presenter: bool = False
 
 
 @dataclass(frozen=True)

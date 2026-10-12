@@ -17,8 +17,12 @@ export type Player = {
   // Présence réseau : un joueur déconnecté reste affiché (classement final)
   // mais son tour est sauté côté serveur (voir docs/websocket-protocol.md).
   connected: boolean
-  // Emoji personnage choisi dans le lobby (ex. "🎭", "🦊") — chaîne vide si pas encore choisi.
+  // ID de l'avatar SVG DiceBear choisi dans le lobby (ex. "alice", "bob").
+  // Toujours assigné au join (tirage aléatoire), modifiable en lobby.
   avatar: string
+  // True pour le Présentateur — il apparaît dans players[] comme tout le
+  // monde mais anime la partie. Un seul par room.
+  isPresenter: boolean
 }
 
 export type GamePhase =
@@ -46,11 +50,8 @@ export type HistoryEntry = {
 
 export type GameState = {
   phase: GamePhase
-  // Nom d'affichage du Présentateur (n'apparaît jamais dans `players`, voir
-  // docs/websocket-protocol.md) — null en mode styleguide/debug sans réseau.
-  presentateurName: string | null
-  // ID d'avatar SVG du Présentateur (géré dans Room.avatars côté serveur, pas dans players).
-  presentateurAvatar: string
+  // Tous les participants (joueurs + présentateur) sont dans players[].
+  // Le présentateur est identifiable via player.isPresenter === true.
   players: Player[]
   themes: Theme[]
   currentPlayerIndex: number

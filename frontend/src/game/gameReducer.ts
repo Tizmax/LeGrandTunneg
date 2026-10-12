@@ -38,8 +38,6 @@ export type GameAction =
 
 export const initialState: GameState = {
   phase: 'lobby',
-  presentateurName: null,
-  presentateurAvatar: '',
   players: [],
   themes: [],
   currentPlayerIndex: 0,
@@ -74,7 +72,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto
         ? crypto.randomUUID()
         : `local-${Date.now()}-${Math.random().toString(36).slice(2)}`
-      return { ...state, players: [...state.players, { id, name, points: 0, connected: true, avatar: '' }] }
+      return { ...state, players: [...state.players, { id, name, points: 0, connected: true, avatar: '', isPresenter: false }] }
     }
 
     case 'REMOVE_PLAYER': {
@@ -114,8 +112,10 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
     case 'START_GAME': {
       // Fusion lobby 2026-10-11 : les deux préconditions (joueurs + thèmes)
       // sont vérifiées ici puisqu'il n'y a plus d'étape GO_TO_THEMES séparée.
-      if (state.players.length < 2 || state.themes.length < 1) return state
-      const startIndex = Math.floor(Math.random() * state.players.length)
+      const joueurs = state.players.filter((p) => !p.isPresenter)
+      if (joueurs.length < 2 || state.themes.length < 1) return state
+      const joueurIndices = state.players.map((p, i) => ({ p, i })).filter(({ p }) => !p.isPresenter).map(({ i }) => i)
+      const startIndex = joueurIndices[Math.floor(Math.random() * joueurIndices.length)]
       return {
         ...state,
         // Couche show : le choix de thème du premier tour est éligible mais

@@ -51,10 +51,6 @@ class Room:
     # local_player_id -> pseudo d'affichage (y compris pour presentateur/écran,
     # qui n'apparaissent jamais dans state.players)
     names: dict[str, str] = field(default_factory=dict)
-    # local_player_id -> avatar emoji choisi dans le lobby (tous rôles).
-    # Les joueurs ont aussi leur avatar dans state.players.avatar (via engine),
-    # mais le Présentateur/Écran principal n'ont d'entrée que dans cette table.
-    avatars: dict[str, str] = field(default_factory=dict)
     # local_player_id -> connexion WS active (une seule par participant)
     connections: dict[str, "WebSocket"] = field(default_factory=dict)
     presentateur_id: str | None = None
@@ -64,18 +60,6 @@ class Room:
 
     def role_of(self, local_player_id: str) -> engine.Role | None:
         return self.roles.get(local_player_id)
-
-    @property
-    def presentateur_name(self) -> str | None:
-        if self.presentateur_id is None:
-            return None
-        return self.names.get(self.presentateur_id)
-
-    @property
-    def presentateur_avatar(self) -> str:
-        if self.presentateur_id is None:
-            return ""
-        return self.avatars.get(self.presentateur_id, "")
 
 
 class RoomManager:
@@ -90,13 +74,21 @@ class RoomManager:
         raise RuntimeError("Impossible de générer un code de room unique.")
 
     def create_room(self, pseudo: str) -> tuple[Room, str]:
-        """Crée une room ; le créateur devient Présentateur (pas un joueur)."""
+        """Crée une room ; le créateur devient Présentateur (Player avec is_presenter=True)."""
         pseudo = pseudo.strip()
         if not pseudo:
             raise ValueError("Le pseudo ne peut pas être vide.")
         code = self._generate_unique_code()
         room = Room(code=code)
         local_player_id = str(uuid.uuid4())
+        # Le présentateur entre dans state.players comme tout le monde,
+        # avec is_presenter=True. Avatar tiré au sort sur état vide.
+        room.state = engine.add_player(
+            room.state,
+            player_id=local_player_id,
+            name=pseudo,
+            is_presenter=True,
+        )
         room.roles[local_player_id] = "presentateur"
         room.names[local_player_id] = pseudo
         room.presentateur_id = local_player_id
@@ -138,7 +130,9 @@ class RoomManager:
         new_id = str(uuid.uuid4())
         if role == "joueur":
             # Peut lever GameError("invalid_phase", ...) si la partie a déjà
-            # quitté le lobby — laissé à l'appelant (route REST) de traduire.
+            # quitté le lobby, ou GameError("invalid_payload", ...) si la room
+            # est pleine (MAX_PLAYERS atteint) — laissé à l'appelant (route
+            # REST) de traduire en réponse HTTP appropriée.
             room.state = engine.add_player(room.state, new_id, pseudo)
 
         room.roles[new_id] = role
@@ -149,24 +143,15 @@ class RoomManager:
         self._rooms.pop(code, None)
 
     def rename_participant(
-        self, code: str, local_player_id: str, name: str
+        self, code: str, local_player_id: str, name: str, role: str
     ) -> Room:
-        """Renomme le Présentateur ou l'Écran principal (jamais dans
-        `state.players`, donc hors du moteur de règles `app.game.engine`).
-
-        Le renommage d'un `joueur` passe par `engine.rename_player` (il doit
-        muter `state.players`, voir le handler WS dédié) — cette méthode ne
-        gère QUE les deux rôles qui vivent uniquement dans `Room.names`.
-        Possible uniquement en lobby, comme pour le renommage joueur."""
+        """Renomme n'importe quel participant via l'engine (tous sont dans state.players).
+        Synchronise aussi Room.names pour rétrocompatibilité."""
         room = self.get_room(code)
         if local_player_id not in room.roles:
             raise UnknownParticipantError(local_player_id)
-        if room.state.phase != "lobby":
-            raise ValueError("Le renommage n'est possible qu'en lobby.")
-        name = name.strip()
-        if not name:
-            raise ValueError("Le pseudo ne peut pas être vide.")
-        room.names[local_player_id] = name
+        room.state = engine.rename_player(room.state, role, local_player_id, name)
+        room.names[local_player_id] = name.strip()
         return room
 
     def attach_connection(
@@ -198,8 +183,6 @@ class RoomManager:
         if room is None:
             return
         stale: list[str] = []
-        presentateur_name = room.presentateur_name
-        presentateur_avatar = room.presentateur_avatar
         for local_player_id, conn in list(room.connections.items()):
             role = room.roles.get(local_player_id)
             if role is None:
@@ -212,9 +195,7 @@ class RoomManager:
                             "code": code,
                             "role": role,
                             "localPlayerId": local_player_id,
-                            "state": serialize_state(
-                                room.state, presentateur_name, presentateur_avatar
-                            ),
+                            "state": serialize_state(room.state),
                         },
                     }
                 )

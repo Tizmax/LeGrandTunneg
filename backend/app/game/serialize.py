@@ -1,5 +1,9 @@
 """Sérialisation GameState (Python, snake_case) -> DTO JSON camelCase,
 conforme au schéma documenté dans docs/websocket-protocol.md.
+
+Le Présentateur apparaît désormais dans `players[]` avec `isPresenter: true`
+(unification 2026-10-12). Les champs `presentateurName`/`presentateurAvatar`
+ont été retirés du payload.
 """
 
 from __future__ import annotations
@@ -9,18 +13,9 @@ from typing import Any
 from .types import GameState
 
 
-def serialize_state(
-    state: GameState,
-    presentateur_name: str | None = None,
-    presentateur_avatar: str = "",
-) -> dict[str, Any]:
-    """`presentateur_name` et `presentateur_avatar` viennent de
-    `app.rooms.manager.Room` (le Présentateur n'apparaît jamais dans
-    `state.players`, voir docs/websocket-protocol.md)."""
+def serialize_state(state: GameState) -> dict[str, Any]:
     return {
         "phase": state.phase,
-        "presentateurName": presentateur_name,
-        "presentateurAvatar": presentateur_avatar,
         "players": [
             {
                 "id": p.id,
@@ -28,6 +23,7 @@ def serialize_state(
                 "points": p.points,
                 "connected": p.connected,
                 "avatar": p.avatar,
+                "isPresenter": p.is_presenter,
             }
             for p in state.players
         ],

@@ -50,25 +50,53 @@ def _require_role(actor_role: Role, required: Role) -> None:
         )
 
 
+def _require_presenter(state: GameState, actor_player_id: str) -> None:
+    """Vérifie que l'acteur est bien le présentateur (is_presenter=True dans players)."""
+    player = next((p for p in state.players if p.id == actor_player_id), None)
+    if player is None or not player.is_presenter:
+        raise GameError("forbidden_role", "Action réservée au Présentateur.")
+
+
 # IDs des avatars SVG embarqués dans frontend/public/avatars/{id}.svg
 # (DiceBear Lorelei, seeds fixes, licence CC0)
-_ALLOWED_AVATARS: frozenset[str] = frozenset([
+_ALLOWED_AVATARS: list[str] = [
     "alice", "bob", "charlie", "diana", "edgar", "flora",
     "gareth", "hannah", "ivan", "julia", "kevin", "luna",
     "marco", "nina", "oscar", "petra",
-])
+]
+_ALLOWED_AVATARS_SET: frozenset[str] = frozenset(_ALLOWED_AVATARS)
+
+# Limite maximale de participants (présentateur inclus)
+MAX_PLAYERS = 16
+
+
+def _taken_avatars(state: GameState) -> set[str]:
+    """Retourne l'ensemble des avatars déjà assignés dans la room."""
+    return {p.avatar for p in state.players if p.avatar}
+
+
+def pick_random_avatar(state: GameState) -> str:
+    """Tire au sort un avatar libre (non pris par un autre participant).
+    Retombe sur n'importe quel avatar autorisé si tous sont pris (cas limite)."""
+    taken = _taken_avatars(state)
+    free = [a for a in _ALLOWED_AVATARS if a not in taken]
+    pool = free if free else _ALLOWED_AVATARS
+    return random.choice(pool)
 
 
 def set_player_avatar(
-    state: GameState, actor_role: Role, actor_player_id: str, avatar: str
+    state: GameState, actor_player_id: str, avatar: str
 ) -> GameState:
-    """Change l'avatar d'un joueur (seulement en lobby, par le joueur lui-même).
-    Le Présentateur gère son avatar via Room.avatars (hors engine)."""
-    _require_role(actor_role, "joueur")
+    """Change l'avatar d'un participant (joueur ou présentateur) en lobby.
+    Vérifie que l'avatar est autorisé et non déjà pris par un autre."""
     if state.phase != "lobby":
         raise GameError("invalid_phase", "L'avatar ne peut être changé qu'en lobby.")
-    if avatar not in _ALLOWED_AVATARS:
+    if avatar not in _ALLOWED_AVATARS_SET:
         raise GameError("invalid_payload", f"Avatar non autorisé : {avatar!r}")
+    # Vérifie que personne d'autre n'a déjà cet avatar
+    for p in state.players:
+        if p.avatar == avatar and p.id != actor_player_id:
+            raise GameError("invalid_payload", f"Cet avatar est déjà pris.")
     new_players = tuple(
         replace(p, avatar=avatar) if p.id == actor_player_id else p
         for p in state.players
@@ -79,9 +107,12 @@ def set_player_avatar(
 def _require_current_player(
     state: GameState, actor_role: Role, actor_player_id: str
 ) -> None:
-    if actor_role != "joueur":
+    # Le présentateur ne peut pas jouer son propre tour
+    actor = next((p for p in state.players if p.id == actor_player_id), None)
+    if actor is None or actor.is_presenter:
         raise GameError("forbidden_role", "Action réservée au joueur concerné.")
-    if not state.players:
+    joueurs = [p for p in state.players if not p.is_presenter]
+    if not joueurs:
         raise GameError("invalid_phase", "Aucun joueur dans la partie.")
     current = state.players[state.current_player_index]
     if current.id != actor_player_id:
@@ -92,16 +123,15 @@ def _require_current_player(
 
 def _next_player_index(players: tuple[Player, ...], current: int) -> int:
     """Avance au joueur suivant dans l'ordre fixe, en SAUTANT les joueurs
-    déconnectés (voir `set_player_connected`) : un joueur parti reste dans
-    `players` (classement final) mais son tour ne lui est plus proposé tant
-    qu'il n'est pas revenu. Si personne n'est connecté (cas limite), on
-    avance quand même d'un cran pour ne jamais bloquer le moteur."""
+    déconnectés ET le présentateur (qui n'a pas de tour). Un joueur parti
+    reste dans `players` (classement final) mais son tour est sauté tant
+    qu'il n'est pas revenu. Si aucun joueur éligible, avance d'un cran."""
     count = len(players)
     if count == 0:
         return 0
     for step in range(1, count + 1):
         idx = (current + step) % count
-        if players[idx].connected:
+        if players[idx].connected and not players[idx].is_presenter:
             return idx
     return (current + 1) % count
 
@@ -148,8 +178,17 @@ def _record_coffrage(
 # `lobby:go_to_themes` / l'action `GO_TO_THEMES` n'existent plus.
 
 
-def add_player(state: GameState, player_id: str, name: str) -> GameState:
-    """Appelé par la couche REST (jointure de room), pas par un message WS."""
+def add_player(
+    state: GameState,
+    player_id: str,
+    name: str,
+    is_presenter: bool = False,
+    avatar: str = "",
+) -> GameState:
+    """Appelé par la couche REST (jointure de room), pas par un message WS.
+
+    Si `avatar` est vide, tire au sort un avatar libre automatiquement.
+    La limite MAX_PLAYERS (16) s'applique au total (présentateur inclus)."""
     name = name.strip()
     if not name:
         raise GameError("invalid_payload", "Le pseudo ne peut pas être vide.")
@@ -157,8 +196,17 @@ def add_player(state: GameState, player_id: str, name: str) -> GameState:
         raise GameError(
             "invalid_phase", "Impossible de rejoindre une partie déjà lancée."
         )
+    if len(state.players) >= MAX_PLAYERS:
+        raise GameError(
+            "invalid_payload",
+            f"La room est pleine (maximum {MAX_PLAYERS} participants).",
+        )
+    chosen_avatar = avatar if avatar in _ALLOWED_AVATARS_SET else pick_random_avatar(state)
     return replace(
-        state, players=state.players + (Player(id=player_id, name=name),)
+        state,
+        players=state.players + (
+            Player(id=player_id, name=name, avatar=chosen_avatar, is_presenter=is_presenter),
+        ),
     )
 
 
@@ -168,6 +216,8 @@ def remove_player(state: GameState, index: int, actor_role: Role) -> GameState:
         raise GameError("invalid_phase", "Le lobby est clos.")
     if not (0 <= index < len(state.players)):
         raise GameError("invalid_payload", "Index de joueur invalide.")
+    if state.players[index].is_presenter:
+        raise GameError("invalid_payload", "Impossible de retirer le Présentateur.")
     return replace(
         state,
         players=tuple(p for i, p in enumerate(state.players) if i != index),
@@ -177,12 +227,8 @@ def remove_player(state: GameState, index: int, actor_role: Role) -> GameState:
 def rename_player(
     state: GameState, actor_role: Role, actor_player_id: str, name: str
 ) -> GameState:
-    """Un joueur renomme UNIQUEMENT lui-même, possible seulement en lobby.
-
-    Le renommage du Présentateur et de l'Écran principal (qui n'apparaissent
-    jamais dans `state.players`) est géré hors de ce module, directement au
-    niveau de `app.rooms.manager.Room.names` par le handler WS."""
-    _require_role(actor_role, "joueur")
+    """Tout participant (joueur ou présentateur) renomme UNIQUEMENT lui-même,
+    possible seulement en lobby."""
     if state.phase != "lobby":
         raise GameError("invalid_phase", "Le renommage n'est possible qu'en lobby.")
     name = name.strip()
@@ -192,7 +238,7 @@ def rename_player(
         (i for i, p in enumerate(state.players) if p.id == actor_player_id), None
     )
     if index is None:
-        raise GameError("invalid_payload", "Joueur introuvable dans la partie.")
+        raise GameError("invalid_payload", "Participant introuvable dans la partie.")
     players = tuple(
         replace(p, name=name) if i == index else p
         for i, p in enumerate(state.players)
@@ -223,17 +269,22 @@ def remove_theme(state: GameState, index: int, actor_role: Role) -> GameState:
 
 
 def start_game(
-    state: GameState, actor_role: Role, rng: random.Random | None = None
+    state: GameState, actor_role: Role, actor_player_id: str = "", rng: random.Random | None = None
 ) -> GameState:
     _require_role(actor_role, "presentateur")
     if state.phase != "lobby":
         raise GameError("invalid_phase", "La partie a déjà démarré.")
-    if len(state.players) < 2:
+    # Compte uniquement les joueurs (pas le présentateur)
+    joueurs = [p for p in state.players if not p.is_presenter]
+    if len(joueurs) < 2:
         raise GameError("invalid_payload", "Minimum 2 joueurs requis.")
     if len(state.themes) < 1:
         raise GameError("invalid_payload", "Minimum 1 thème requis.")
     rng = rng or random
-    start_index = rng.randrange(len(state.players))
+    # Le premier joueur est tiré parmi les joueurs (pas le présentateur)
+    # On trouve leur index réel dans state.players
+    joueur_indices = [i for i, p in enumerate(state.players) if not p.is_presenter]
+    start_index = rng.choice(joueur_indices)
     return replace(
         state,
         phase="selection-pending",
@@ -479,8 +530,7 @@ def end_game_early(state: GameState, actor_role: Role) -> GameState:
     _require_role(actor_role, "presentateur")
     return replace(
         state,
-        # `connected` n'est PAS réinitialisé ici : reflète la vraie connexion
-        # WS en cours, gérée uniquement par `set_player_connected`.
+        # `connected` et `is_presenter` ne sont PAS réinitialisés ici.
         players=tuple(replace(p, points=0) for p in state.players),
         themes=tuple(reset_theme(t) for t in state.themes),
         current_player_index=0,
@@ -517,9 +567,14 @@ __all__ = [
     "Role",
     "ErrorCode",
     "GameError",
+    "MAX_PLAYERS",
+    "_ALLOWED_AVATARS",
+    "_ALLOWED_AVATARS_SET",
+    "pick_random_avatar",
     "add_player",
     "remove_player",
     "rename_player",
+    "set_player_avatar",
     "add_theme",
     "remove_theme",
     "start_game",

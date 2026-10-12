@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { GameAction } from '../game/gameReducer'
-import type { GameState } from '../game/types'
+import type { GameState, Player } from '../game/types'
 import type { Role } from '../net/types'
 import { ScreenShell } from '../components/ScreenShell'
 import { Button } from '../components/Button'
@@ -17,24 +17,34 @@ type LobbyScreenProps = {
 }
 
 /**
- * Lobby unique (fusion 2026-10-11 des anciens écrans MenuScreen + ThemesScreen).
- * Ajout 2026-10-12 : chaque participant (joueur et Présentateur) peut choisir
- * son icône de personnage parmi 16 emojis dans le lobby.
+ * Lobby unifié (refonte 2026-10-12) :
+ * - Présentateur et joueurs sont tous dans state.players (is_presenter=True pour le présentateur)
+ * - Cartes organiques pour chaque participant, avec avatar SVG
+ * - AvatarPicker sur la gauche, 1 avatar = 1 joueur (gris si pris par un autre)
+ * - Avatar tiré aléatoirement à l'entrée dans la room
  */
 export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: LobbyScreenProps) {
   const isPresenter = role === 'presentateur'
-  const canStart = state.players.length >= 2 && state.themes.length >= 1
+  const joueurs = state.players.filter((p) => !p.isPresenter)
+  const canStart = joueurs.length >= 2 && state.themes.length >= 1
   const { playEffect } = useAudio()
 
   const [editingSelf, setEditingSelf] = useState(false)
   const [nameDraft, setNameDraft] = useState('')
   const [themeLabel, setThemeLabel] = useState('')
-  const [showAvatarPicker, setShowAvatarPicker] = useState(false)
 
-  const myPlayer = role === 'joueur' ? state.players.find((p) => p.id === localPlayerId) : undefined
-  const myDisplayName = isPresenter ? state.presentateurName : (myPlayer?.name ?? null)
-  const myAvatar = isPresenter ? state.presentateurAvatar : (myPlayer?.avatar ?? '')
-  const canRenameSelf = isPresenter || Boolean(myPlayer)
+  // Mon entrée dans players[]
+  const me = state.players.find((p) => p.id === localPlayerId)
+  const myAvatar = me?.avatar ?? ''
+  const myDisplayName = me?.name ?? null
+
+  // Avatars pris par d'autres (pour griser dans le picker)
+  const takenBy: Record<string, string> = {}
+  for (const p of state.players) {
+    if (p.avatar && p.id !== localPlayerId) {
+      takenBy[p.avatar] = p.name
+    }
+  }
 
   function startEditingSelf() {
     setNameDraft(myDisplayName ?? '')
@@ -49,7 +59,6 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
 
   function handleSelectAvatar(avatar: string) {
     dispatch({ type: 'SET_AVATAR', avatar })
-    setShowAvatarPicker(false)
   }
 
   function handleAddTheme() {
@@ -61,6 +70,8 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
   return (
     <ScreenShell spotlight smoke>
       <div className="flex flex-1 flex-col items-center justify-center gap-8 overflow-y-auto py-10">
+
+        {/* Titre */}
         <div className="animate-rise-up text-center">
           <p className="mb-2 text-xs tracking-[0.5em] text-brass-400/80 uppercase">
             ★ Ce soir, sur scène ★
@@ -75,215 +86,241 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
           </p>
         </div>
 
-        <div className="flex w-full max-w-md flex-col items-center gap-6">
-          {/* Carte principale : code de room, présentateur, renommage, joueurs */}
-          <div className="string-lights animate-rise-up relative w-full rounded-2xl border border-brass-600/30 bg-gradient-to-b from-charcoal-800 to-charcoal-900 p-6 shadow-stage-lg">
-            <ArtDecoCorner position="top-left" />
-            <ArtDecoCorner position="top-right" />
-            <ArtDecoCorner position="bottom-left" />
-            <ArtDecoCorner position="bottom-right" />
+        {/* Corps principal : 2 colonnes sur desktop */}
+        <div className="animate-rise-up flex w-full max-w-4xl flex-col gap-6 lg:flex-row lg:items-start lg:gap-8 px-4">
 
-            {/* Code de room + Présentateur avec avatar */}
-            <div className="mb-5 flex flex-col items-center gap-1">
-              <span className="text-xs tracking-[0.3em] text-[#9a8d7d] uppercase">
-                Code de la room
-              </span>
-              <span className="font-display text-3xl font-black tracking-[0.3em] text-amber-glow">
+          {/* Colonne gauche : picker d'avatar + code room */}
+          <div className="flex flex-col gap-4 lg:w-56 lg:shrink-0">
+
+            {/* Code room */}
+            <div className="rounded-2xl border border-brass-600/30 bg-gradient-to-b from-charcoal-800 to-charcoal-900 p-4 text-center shadow-stage-lg">
+              <p className="text-xs tracking-[0.3em] text-[#9a8d7d] uppercase">Code room</p>
+              <p className="font-display text-3xl font-black tracking-[0.3em] text-amber-glow">
                 {roomCode}
-              </span>
-              <div className="mt-2 flex items-center gap-2">
-                {state.presentateurAvatar && (
-                  <img
-                    src={avatarUrl(state.presentateurAvatar)}
-                    alt={state.presentateurAvatar}
-                    className="h-8 w-8 rounded-full object-cover"
-                  />
-                )}
-                <span className="text-xs tracking-[0.2em] text-[#9a8d7d] uppercase">
-                  Présentateur :{' '}
-                  <span className="text-[#f1e6d8] normal-case">
-                    {state.presentateurName ?? '…'}
-                  </span>
-                </span>
-              </div>
+              </p>
             </div>
 
-            {/* Identité de soi : renommage + choix avatar */}
-            {canRenameSelf && (
-              <div className="mb-5 flex flex-col gap-3 border-b border-white/5 pb-4">
-                {/* Ligne pseudo */}
-                <div className="flex items-center justify-center gap-2">
-                  {editingSelf ? (
-                    <>
-                      <input
-                        type="text"
-                        value={nameDraft}
-                        autoFocus
-                        onChange={(e) => setNameDraft(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') confirmRename()
-                          if (e.key === 'Escape') setEditingSelf(false)
-                        }}
-                        maxLength={24}
-                        className="flex-1 rounded-lg border border-brass-600/30 bg-charcoal-900/80 px-3 py-1.5 text-sm text-[#f1e6d8] outline-none focus:border-amber-glow"
-                      />
-                      <Button variant="primary" className="px-3 py-1.5 text-xs" onClick={confirmRename}>
-                        Valider
-                      </Button>
-                    </>
-                  ) : (
-                    <>
-                      {myAvatar && (
-                        <img
-                          src={avatarUrl(myAvatar)}
-                          alt={myAvatar}
-                          className="h-8 w-8 rounded-full object-cover"
-                        />
-                      )}
-                      <span className="text-xs tracking-wide text-[#9a8d7d] uppercase">
-                        Vous êtes{' '}
-                        <span className="text-[#f1e6d8] normal-case">{myDisplayName}</span>
-                      </span>
-                      <button
-                        onClick={startEditingSelf}
-                        className="cursor-pointer text-xs tracking-wide text-amber-glow uppercase transition-colors hover:text-amber-ember"
-                      >
-                        Changer
-                      </button>
-                    </>
-                  )}
-                </div>
-
-                {/* Sélecteur d'avatar */}
-                <div className="flex flex-col items-center gap-2">
-                  <button
-                    onClick={() => setShowAvatarPicker((v) => !v)}
-                    className="text-xs tracking-wide text-amber-glow uppercase transition-colors hover:text-amber-ember"
-                  >
-                    {showAvatarPicker ? 'Fermer le choix' : (myAvatar ? 'Changer mon icône' : 'Choisir mon icône')}
-                  </button>
-                  {showAvatarPicker && (
-                    <div className="w-full rounded-xl border border-brass-600/20 bg-charcoal-900/80 p-3">
-                      <AvatarPicker selected={myAvatar} onSelect={handleSelectAvatar} />
-                    </div>
-                  )}
-                </div>
+            {/* Mon pseudo + renommage */}
+            {me && (
+              <div className="rounded-2xl border border-brass-600/30 bg-gradient-to-b from-charcoal-800 to-charcoal-900 p-4 shadow-stage-lg">
+                <p className="mb-2 text-xs tracking-[0.2em] text-[#9a8d7d] uppercase">Vous êtes</p>
+                {editingSelf ? (
+                  <div className="flex flex-col gap-2">
+                    <input
+                      type="text"
+                      value={nameDraft}
+                      autoFocus
+                      onChange={(e) => setNameDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') confirmRename()
+                        if (e.key === 'Escape') setEditingSelf(false)
+                      }}
+                      maxLength={24}
+                      className="w-full rounded-lg border border-brass-600/30 bg-charcoal-900/80 px-3 py-1.5 text-sm text-[#f1e6d8] outline-none focus:border-amber-glow"
+                    />
+                    <Button variant="primary" className="py-1.5 text-xs" onClick={confirmRename}>
+                      Valider
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <span className="font-display text-lg text-[#f1e6d8]">{myDisplayName}</span>
+                    <button
+                      onClick={startEditingSelf}
+                      className="text-xs text-amber-glow uppercase transition-colors hover:text-amber-ember"
+                    >
+                      Changer
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Liste des joueurs avec leurs avatars */}
-            {state.players.length > 0 ? (
-              <ul className="flex flex-col gap-2">
-                {state.players.map((player, i) => (
-                  <li
-                    key={player.id}
-                    className="flex items-center justify-between rounded-lg border border-white/5 bg-charcoal-900/60 px-4 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-charcoal-800 overflow-hidden">
-                        {player.avatar
-                          ? <img src={avatarUrl(player.avatar)} alt={player.avatar} className="h-full w-full object-cover" />
-                          : <span className="text-xl text-[#7a6f63]">?</span>
-                        }
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="font-display text-lg text-[#f1e6d8]">{player.name}</span>
-                        {!player.connected && (
-                          <span className="text-xs text-[#7a6f63]">déconnecté</span>
-                        )}
-                      </div>
-                    </div>
-                    {isPresenter && (
-                      <button
-                        onClick={() => dispatch({ type: 'REMOVE_PLAYER', index: i })}
-                        className="cursor-pointer text-xs tracking-wide text-burgundy-500 uppercase transition-colors hover:text-burgundy-500/70"
-                      >
-                        Retirer
-                      </button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-center text-xs text-[#7a6f63]">
-                Aucun joueur n'a encore rejoint la room.
-              </p>
-            )}
-
-            {state.players.length < 2 && (
-              <p className="mt-4 text-center text-xs text-[#7a6f63]">
-                Minimum 2 joueurs requis pour lancer la partie.
-              </p>
+            {/* Avatar picker */}
+            {me && (
+              <div className="rounded-2xl border border-brass-600/30 bg-gradient-to-b from-charcoal-800 to-charcoal-900 p-4 shadow-stage-lg">
+                <p className="mb-3 text-xs tracking-[0.2em] text-[#9a8d7d] uppercase">Mon avatar</p>
+                <AvatarPicker
+                  selected={myAvatar}
+                  onSelect={handleSelectAvatar}
+                  takenBy={takenBy}
+                />
+              </div>
             )}
           </div>
 
-        </div>
+          {/* Colonne droite : grille des participants + thèmes (présentateur) */}
+          <div className="flex flex-1 flex-col gap-6">
 
-        {/* Panneau des thèmes — visible UNIQUEMENT par le Présentateur. */}
-        {isPresenter && (
-          <div className="animate-rise-up lg:fixed lg:right-4 lg:top-1/2 lg:-translate-y-1/2 w-full max-w-md lg:w-64 lg:max-w-none rounded-2xl border border-brass-600/30 bg-gradient-to-b from-charcoal-800 to-charcoal-900 p-5 shadow-stage-lg">
-            <p className="mb-3 text-center text-xs tracking-[0.4em] text-brass-400/80 uppercase">
-              ★ Thèmes ★
-            </p>
+            {/* Grille des cartes participants */}
+            <div className="relative rounded-2xl border border-brass-600/30 bg-gradient-to-b from-charcoal-800 to-charcoal-900 p-5 shadow-stage-lg">
+              <ArtDecoCorner position="top-left" />
+              <ArtDecoCorner position="top-right" />
+              <p className="mb-4 text-center text-xs tracking-[0.4em] text-brass-400/80 uppercase">
+                ★ Participants ★
+              </p>
 
-            <div className="flex flex-col gap-2">
-              <input
-                type="text"
-                value={themeLabel}
-                onChange={(e) => setThemeLabel(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleAddTheme()
-                }}
-                placeholder="Nouveau thème"
-                maxLength={30}
-                className="w-full rounded-lg border border-brass-600/30 bg-charcoal-900/80 px-3 py-2 text-sm text-[#f1e6d8] placeholder-[#6b625b] shadow-[inset_0_2px_6px_rgba(0,0,0,0.4)] outline-none focus:border-amber-glow focus:shadow-[inset_0_2px_6px_rgba(0,0,0,0.4),0_0_0_3px_rgba(232,163,61,0.2)]"
-              />
-              <Button variant="primary" className="w-full" onClick={handleAddTheme} disabled={!themeLabel.trim()}>
-                Ajouter
-              </Button>
-            </div>
-
-              {state.themes.length > 0 && (
-                <ul className="mt-5 flex max-h-64 flex-col gap-2 overflow-y-auto pr-1">
-                  {state.themes.map((theme, i) => (
-                    <li
-                      key={i}
-                      className="flex items-center justify-between rounded-lg border border-white/5 bg-charcoal-900/60 px-4 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
-                    >
-                      <span className="font-display text-sm text-[#f1e6d8]">{theme.label}</span>
-                      <button
-                        onClick={() => dispatch({ type: 'REMOVE_THEME', index: i })}
-                        className="cursor-pointer text-xs tracking-wide text-burgundy-500 uppercase transition-colors hover:text-burgundy-500/70"
-                      >
-                        Retirer
-                      </button>
-                    </li>
+              {state.players.length > 0 ? (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+                  {state.players.map((player, i) => (
+                    <PlayerCard
+                      key={player.id}
+                      player={player}
+                      isMe={player.id === localPlayerId}
+                      canRemove={isPresenter && !player.isPresenter}
+                      onRemove={() => dispatch({ type: 'REMOVE_PLAYER', index: i })}
+                    />
                   ))}
-                </ul>
+                </div>
+              ) : (
+                <p className="text-center text-xs text-[#7a6f63]">
+                  Aucun participant pour l'instant.
+                </p>
               )}
 
-            {state.themes.length < 1 && (
-              <p className="mt-4 text-center text-xs text-[#7a6f63]">
-                Minimum 1 thème requis pour lancer la partie.
-              </p>
+              {joueurs.length < 2 && (
+                <p className="mt-4 text-center text-xs text-[#7a6f63]">
+                  Minimum 2 joueurs requis pour lancer la partie.
+                </p>
+              )}
+            </div>
+
+            {/* Panneau des thèmes — visible UNIQUEMENT par le Présentateur */}
+            {isPresenter && (
+              <div className="rounded-2xl border border-brass-600/30 bg-gradient-to-b from-charcoal-800 to-charcoal-900 p-5 shadow-stage-lg">
+                <p className="mb-3 text-center text-xs tracking-[0.4em] text-brass-400/80 uppercase">
+                  ★ Thèmes ★
+                </p>
+
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={themeLabel}
+                    onChange={(e) => setThemeLabel(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleAddTheme() }}
+                    placeholder="Nouveau thème"
+                    maxLength={30}
+                    className="flex-1 rounded-lg border border-brass-600/30 bg-charcoal-900/80 px-3 py-2 text-sm text-[#f1e6d8] placeholder-[#6b625b] outline-none focus:border-amber-glow"
+                  />
+                  <Button variant="primary" onClick={handleAddTheme} disabled={!themeLabel.trim()}>
+                    Ajouter
+                  </Button>
+                </div>
+
+                {state.themes.length > 0 && (
+                  <ul className="mt-4 flex max-h-48 flex-col gap-1.5 overflow-y-auto pr-1">
+                    {state.themes.map((theme, i) => (
+                      <li
+                        key={i}
+                        className="flex items-center justify-between rounded-lg border border-white/5 bg-charcoal-900/60 px-4 py-2"
+                      >
+                        <span className="font-display text-sm text-[#f1e6d8]">{theme.label}</span>
+                        <button
+                          onClick={() => dispatch({ type: 'REMOVE_THEME', index: i })}
+                          className="cursor-pointer text-xs text-burgundy-500 uppercase transition-colors hover:text-burgundy-500/70"
+                        >
+                          Retirer
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {state.themes.length < 1 && (
+                  <p className="mt-3 text-center text-xs text-[#7a6f63]">
+                    Minimum 1 thème requis pour lancer la partie.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Bouton lancer — présentateur uniquement */}
+            {isPresenter && (
+              <Button
+                variant="gold"
+                className="w-full py-3 text-base"
+                disabled={!canStart}
+                onClick={() => {
+                  playEffect('theme_start')
+                  dispatch({ type: 'START_GAME' })
+                }}
+              >
+                Lancer la partie
+              </Button>
             )}
           </div>
-        )}
-
-        {isPresenter && (
-          <Button
-            variant="gold"
-            className="animate-rise-up px-10 py-3 text-base"
-            disabled={!canStart}
-            onClick={() => {
-              playEffect('theme_start')
-              dispatch({ type: 'START_GAME' })
-            }}
-          >
-            Lancer la partie
-          </Button>
-        )}
+        </div>
       </div>
     </ScreenShell>
+  )
+}
+
+// ─── Carte participant ─────────────────────────────────────────────────────────
+
+type PlayerCardProps = {
+  player: Player
+  isMe: boolean
+  canRemove: boolean
+  onRemove: () => void
+}
+
+function PlayerCard({ player, isMe, canRemove, onRemove }: PlayerCardProps) {
+  return (
+    <div
+      className={[
+        'relative flex flex-col items-center gap-2 rounded-2xl border p-3 transition-all',
+        isMe
+          ? 'border-amber-glow/50 bg-amber-glow/5 shadow-[0_0_12px_rgba(232,163,61,0.15)]'
+          : 'border-white/8 bg-charcoal-900/60',
+        !player.connected && 'opacity-50',
+      ].filter(Boolean).join(' ')}
+    >
+      {/* Badge présentateur */}
+      {player.isPresenter && (
+        <span className="absolute -top-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-brass-600 px-2 py-0.5 text-[9px] font-bold tracking-widest text-charcoal-900 uppercase">
+          Présentateur
+        </span>
+      )}
+
+      {/* Badge "moi" */}
+      {isMe && !player.isPresenter && (
+        <span className="absolute -top-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-amber-glow px-2 py-0.5 text-[9px] font-bold tracking-widest text-charcoal-900 uppercase">
+          Vous
+        </span>
+      )}
+
+      {/* Avatar */}
+      <div className="h-16 w-16 overflow-hidden rounded-full border-2 border-white/10 bg-charcoal-800">
+        {player.avatar ? (
+          <img
+            src={avatarUrl(player.avatar)}
+            alt={player.avatar}
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-2xl text-[#7a6f63]">?</div>
+        )}
+      </div>
+
+      {/* Nom */}
+      <p className="max-w-full truncate text-center font-display text-sm text-[#f1e6d8]">
+        {player.name}
+      </p>
+
+      {/* Badge déconnecté */}
+      {!player.connected && (
+        <span className="text-[10px] text-[#7a6f63]">déconnecté</span>
+      )}
+
+      {/* Bouton retirer (présentateur uniquement, pas sur lui-même) */}
+      {canRemove && (
+        <button
+          onClick={onRemove}
+          className="mt-1 cursor-pointer text-[10px] tracking-wide text-burgundy-500 uppercase transition-colors hover:text-burgundy-500/70"
+        >
+          Retirer
+        </button>
+      )}
+    </div>
   )
 }

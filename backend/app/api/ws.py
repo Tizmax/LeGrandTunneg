@@ -4,7 +4,10 @@ Implémente le protocole documenté dans docs/websocket-protocol.md : enveloppe
 `{type, payload}`, dispatch vers `app.game.engine`, broadcast `room:state_sync`
 à toute la room après chaque action acceptée, `error` ciblé au seul client
 fautif en cas de rejet (rôle incorrect, mauvais tour, phase invalide, payload
-invalide) sans aucune mutation d'état ni broadcast dans ce cas.
+invalide) sans aucune mutation d'état ni diffuser de broadcast dans ce cas.
+
+Unification 2026-10-12 : le Présentateur apparaît dans state.players avec
+is_presenter=True. Plus de chemins séparés pour présentateur/joueur.
 """
 
 from __future__ import annotations
@@ -34,8 +37,6 @@ async def _send_state_sync(
     role: str,
     local_player_id: str,
     state: GameState,
-    presentateur_name: str | None,
-    presentateur_avatar: str = "",
 ) -> None:
     await websocket.send_json(
         {
@@ -44,7 +45,7 @@ async def _send_state_sync(
                 "code": code,
                 "role": role,
                 "localPlayerId": local_player_id,
-                "state": serialize_state(state, presentateur_name, presentateur_avatar),
+                "state": serialize_state(state),
             },
         }
     )
@@ -143,9 +144,8 @@ _HANDLERS: dict[str, Callable[[GameState, dict, str, str], GameState]] = {
     "theme:remove": _h_theme_remove,
     "player:remove": _h_player_remove,
     "game:start": _h_game_start,
-    # "player:rename" est traité à part : un Présentateur/Écran principal
-    # n'a pas d'entrée dans GameState.players (voir app/rooms/manager.py),
-    # son nom d'affichage vit uniquement dans Room.names.
+    # "player:rename" et "player:set_avatar" sont traités à part (ci-dessous)
+    # car ils nécessitent le local_player_id directement, pas juste le rôle.
     "choice:reveal": _h_choice_reveal,
     "theme:select": _h_theme_select,
     "timer:start": _h_timer_start,
@@ -155,10 +155,6 @@ _HANDLERS: dict[str, Callable[[GameState, dict, str, str], GameState]] = {
     "answer:continue": _h_answer_continue,
     "answer:vault": _h_answer_vault,
     "game:reset": _h_game_reset,
-    # Le Présentateur peut mettre fin à la partie en cours à tout moment
-    # (visible sur tous les écrans de jeu) : ramène tout le monde au lobby,
-    # joueurs/thèmes conservés, scores remis à zéro. Différent de
-    # "room:quit" qui ferme toute la room (voir boucle principale ci-dessous).
     "game:end_early": _h_game_end_early,
     # "room:quit" est traité à part : il ferme la room plutôt que de
     # simplement muter l'état (voir boucle principale ci-dessous).
@@ -180,26 +176,17 @@ async def websocket_endpoint(websocket: WebSocket, code: str, local_player_id: s
     await websocket.accept()
     role = room.roles[local_player_id]
 
-    # Un Joueur qui se (re)connecte redevient `connected=True` — pertinent
-    # après une déconnexion (voir bloc except ci-dessous) : son tour n'est
-    # plus sauté et les autres clients le voient réapparaître comme présent.
-    # On ne broadcast QUE si l'état a réellement changé (set_player_connected
-    # renvoie le même objet état si déjà dans le bon état) : sinon, chaque
-    # connexion initiale (joueur déjà connecté=True par défaut depuis
-    # add_player) enverrait un state_sync parasite à toute la room, avant
-    # même l'envoi du state_sync initial propre à ce client — désynchronisant
-    # l'ordre des messages reçus par les autres clients déjà connectés.
-    if role == "joueur":
-        async with room.lock:
-            previous_state = room.state
-            room.state = engine.set_player_connected(room.state, local_player_id, True)
-            changed = room.state is not previous_state
-        if changed:
-            await _broadcast_state(code)
+    # Un participant qui se (re)connecte redevient `connected=True`.
+    # Cela s'applique désormais aussi au présentateur (il est dans state.players).
+    async with room.lock:
+        previous_state = room.state
+        room.state = engine.set_player_connected(room.state, local_player_id, True)
+        changed = room.state is not previous_state
+    if changed:
+        await _broadcast_state(code)
 
     await _send_state_sync(
         websocket, code, role, local_player_id, room.state,
-        room.presentateur_name, room.presentateur_avatar,
     )
 
     try:
@@ -220,15 +207,11 @@ async def websocket_endpoint(websocket: WebSocket, code: str, local_player_id: s
                 return
 
             if msg_type == "player:rename":
+                # Tous les participants (joueur et présentateur) renomment via l'engine.
                 name = payload.get("name", "")
                 async with room.lock:
                     try:
-                        if role == "joueur":
-                            room.state = engine.rename_player(
-                                room.state, role, local_player_id, name
-                            )
-                        else:
-                            room_manager.rename_participant(code, local_player_id, name)
+                        room_manager.rename_participant(code, local_player_id, name, role)
                     except engine.GameError as exc:
                         await _send_error(websocket, exc.code, exc.message)
                         continue
@@ -239,28 +222,13 @@ async def websocket_endpoint(websocket: WebSocket, code: str, local_player_id: s
                 continue
 
             if msg_type == "player:set_avatar":
-                # Joueur : avatar via engine (mute state.players).
-                # Présentateur/Écran principal : avatar stocké dans Room.avatars.
+                # Tous les participants passent par engine.set_player_avatar.
                 avatar = payload.get("avatar", "")
                 async with room.lock:
                     try:
-                        if role == "joueur":
-                            room.state = engine.set_player_avatar(
-                                room.state, role, local_player_id, avatar
-                            )
-                        else:
-                            # Présentateur peut changer son avatar en lobby
-                            if room.state.phase != "lobby":
-                                raise engine.GameError(
-                                    "invalid_phase",
-                                    "L'avatar ne peut être changé qu'en lobby.",
-                                )
-                            if avatar not in engine._ALLOWED_AVATARS:
-                                raise engine.GameError(
-                                    "invalid_payload",
-                                    f"Avatar non autorisé : {avatar!r}",
-                                )
-                            room.avatars[local_player_id] = avatar
+                        room.state = engine.set_player_avatar(
+                            room.state, local_player_id, avatar
+                        )
                     except engine.GameError as exc:
                         await _send_error(websocket, exc.code, exc.message)
                         continue
@@ -285,20 +253,16 @@ async def websocket_endpoint(websocket: WebSocket, code: str, local_player_id: s
 
     except WebSocketDisconnect:
         room_manager.detach_connection(code, local_player_id)
-        await _mark_disconnected(code, role, local_player_id)
+        await _mark_disconnected(code, local_player_id)
     except Exception:
         logger.exception("Erreur inattendue sur la connexion WS de la room %s", code)
         room_manager.detach_connection(code, local_player_id)
-        await _mark_disconnected(code, role, local_player_id)
+        await _mark_disconnected(code, local_player_id)
 
 
-async def _mark_disconnected(code: str, role: str, local_player_id: str) -> None:
-    """Marque un Joueur comme absent (voir `engine.set_player_connected`) —
-    reste dans `state.players` pour le classement final, son tour est
-    simplement sauté tant qu'il n'est pas revenu. Ne s'applique pas au
-    Présentateur/Écran principal, absents de `state.players`."""
-    if role != "joueur":
-        return
+async def _mark_disconnected(code: str, local_player_id: str) -> None:
+    """Marque un participant comme absent — s'applique désormais à tous
+    (joueur et présentateur sont tous dans state.players)."""
     try:
         room = room_manager.get_room(code)
     except RoomNotFoundError:
