@@ -28,6 +28,7 @@ function renderScreen(
   role: Role,
   localPlayerId: string | null,
   roomCode: string,
+  onTransferPresenter: (targetPlayerId: string) => void,
 ) {
   switch (phase) {
     case 'lobby':
@@ -38,6 +39,7 @@ function renderScreen(
           role={role}
           localPlayerId={localPlayerId}
           roomCode={roomCode}
+          onTransferPresenter={onTransferPresenter}
         />
       )
     // Couche show : choix de thème pas encore révélé par le Présentateur.
@@ -62,6 +64,7 @@ function renderScreen(
           role={role}
           localPlayerId={localPlayerId}
           roomCode={roomCode}
+          onTransferPresenter={onTransferPresenter}
         />
       )
   }
@@ -140,7 +143,10 @@ function AppConnected() {
   // l'identité et on repart sur l'accueil avec un message clair.
   useEffect(() => {
     if (!identity) return
-    if (connection.status === 'closed') {
+    if (connection.status === 'kicked') {
+      clearStoredIdentity()
+      setSession({ identity: null, connectError: 'Vous avez été retiré de la room par le Présentateur.' })
+    } else if (connection.status === 'closed') {
       clearStoredIdentity()
       setSession({ identity: null, connectError: 'La room a été fermée par le Présentateur.' })
     } else if (connection.status === 'error') {
@@ -200,6 +206,10 @@ function AppConnected() {
     setSession({ identity: null, connectError: null })
   }
 
+  function handleTransferPresenter(targetPlayerId: string) {
+    connection.send({ type: 'presenter:transfer', payload: { targetPlayerId } })
+  }
+
   return (
     <>
       {shouldShowControls(state.phase) && (
@@ -218,7 +228,7 @@ function AppConnected() {
           transition={{ duration: 0.45, ease: [0.4, 0, 0.2, 1] }}
         >
           <div key={`sweep-${state.phase}`} className="light-sweep" aria-hidden="true" />
-          {renderScreen(state.phase, state, dispatch, role, localPlayerId, identity.code)}
+          {renderScreen(state.phase, state, dispatch, role, localPlayerId, identity.code, handleTransferPresenter)}
         </motion.div>
       </AnimatePresence>
     </>

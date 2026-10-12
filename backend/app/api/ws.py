@@ -88,6 +88,10 @@ def _h_player_remove(state: GameState, payload: dict, role: str, pid: str) -> Ga
     return engine.remove_player(state, _require_int(payload, "index"), role)
 
 
+def _h_presenter_transfer(state: GameState, payload: dict, role: str, pid: str) -> GameState:
+    return engine.transfer_presenter(state, _require_str(payload, "targetPlayerId"), role)
+
+
 def _h_game_start(state: GameState, payload: dict, role: str, pid: str) -> GameState:
     return engine.start_game(state, role)
 
@@ -139,10 +143,18 @@ def _require_int(payload: dict, key: str) -> int:
     return value
 
 
+def _require_str(payload: dict, key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise engine.GameError("invalid_payload", f"Champ '{key}' manquant ou invalide.")
+    return value
+
+
 _HANDLERS: dict[str, Callable[[GameState, dict, str, str], GameState]] = {
     "theme:add": _h_theme_add,
     "theme:remove": _h_theme_remove,
-    "player:remove": _h_player_remove,
+    # "player:remove" traité à part : envoie player:kicked ciblé avant broadcast
+    # "presenter:transfer" traité à part : met à jour room.roles / room.presentateur_id
     "game:start": _h_game_start,
     # "player:rename" et "player:set_avatar" sont traités à part (ci-dessous)
     # car ils nécessitent le local_player_id directement, pas juste le rôle.
@@ -233,6 +245,72 @@ async def websocket_endpoint(websocket: WebSocket, code: str, local_player_id: s
                         await _send_error(websocket, exc.code, exc.message)
                         continue
                     await _broadcast_state(code)
+                continue
+
+            if msg_type == "player:remove":
+                # Traitement spécial : envoyer player:kicked au joueur retiré
+                # avant le broadcast général, puis fermer sa connexion.
+                index = payload.get("index")
+                if not isinstance(index, int):
+                    await _send_error(websocket, "invalid_payload", "Champ 'index' manquant ou invalide.")
+                    continue
+                async with room.lock:
+                    try:
+                        kicked_player = room.state.players[index] if 0 <= index < len(room.state.players) else None
+                        room.state = engine.remove_player(room.state, index, role)
+                    except engine.GameError as exc:
+                        await _send_error(websocket, exc.code, exc.message)
+                        continue
+                    # Notifier le joueur kické (si sa connexion WS est active)
+                    if kicked_player:
+                        kicked_conn = room.connections.get(kicked_player.id)
+                        if kicked_conn:
+                            try:
+                                await kicked_conn.send_json({"type": "player:kicked", "payload": {}})
+                                await kicked_conn.close()
+                            except Exception:
+                                pass
+                            room.connections.pop(kicked_player.id, None)
+                    await _broadcast_state(code)
+                continue
+
+            if msg_type == "presenter:transfer":
+                # Transfert du rôle Présentateur à un joueur existant.
+                # Met à jour room.roles et room.presentateur_id, et met à jour
+                # is_presenter dans state.players via engine.transfer_presenter.
+                target_id = payload.get("targetPlayerId", "")
+                if not isinstance(target_id, str) or not target_id:
+                    await _send_error(websocket, "invalid_payload", "Champ 'targetPlayerId' manquant.")
+                    continue
+                async with room.lock:
+                    try:
+                        room.state = engine.transfer_presenter(room.state, target_id, role)
+                    except engine.GameError as exc:
+                        await _send_error(websocket, exc.code, exc.message)
+                        continue
+                    # Mettre à jour les rôles en mémoire dans la room
+                    old_presenter_id = room.presentateur_id
+                    if old_presenter_id:
+                        room.roles[old_presenter_id] = "joueur"
+                    room.roles[target_id] = "presentateur"
+                    room.presentateur_id = target_id
+                    await _broadcast_state(code)
+                    # Envoyer un state_sync ciblé à chaque participant pour
+                    # mettre à jour son `role` dans le payload
+                    for pid_conn, conn in list(room.connections.items()):
+                        r = room.roles.get(pid_conn, "joueur")
+                        try:
+                            await conn.send_json({
+                                "type": "room:state_sync",
+                                "payload": {
+                                    "code": code,
+                                    "role": r,
+                                    "localPlayerId": pid_conn,
+                                    "state": serialize_state(room.state),
+                                },
+                            })
+                        except Exception:
+                            pass
                 continue
 
             handler = _HANDLERS.get(msg_type)

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Copy, Check, Pencil, Trash2, DoorOpen, Rocket } from 'lucide-react'
+import { Copy, Check, Pencil, Trash2, DoorOpen, Rocket, Crown } from 'lucide-react'
 import type { GameAction } from '../game/gameReducer'
 import type { GameState, Player } from '../game/types'
 import type { Role } from '../net/types'
@@ -15,6 +15,7 @@ type LobbyScreenProps = {
   role: Role
   localPlayerId: string | null
   roomCode: string
+  onTransferPresenter?: (targetPlayerId: string) => void
 }
 
 /**
@@ -24,7 +25,7 @@ type LobbyScreenProps = {
  * - AvatarPicker sur la gauche, 1 avatar = 1 joueur (gris si pris par un autre)
  * - Avatar tiré aléatoirement à l'entrée dans la room
  */
-export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: LobbyScreenProps) {
+export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode, onTransferPresenter }: LobbyScreenProps) {
   const isPresenter = role === 'presentateur'
   const joueurs = state.players.filter((p) => !p.isPresenter)
   const canStart = joueurs.length >= 2 && state.themes.length >= 1
@@ -190,8 +191,10 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode }: 
                       key={player.id}
                       player={player}
                       isMe={player.id === localPlayerId}
-                      canRemove={isPresenter && !player.isPresenter}
+                      canRemove={isPresenter && !player.isPresenter && player.id !== localPlayerId}
                       onRemove={() => dispatch({ type: 'REMOVE_PLAYER', index: i })}
+                      canTransfer={isPresenter && !player.isPresenter && !!onTransferPresenter}
+                      onTransfer={() => onTransferPresenter?.(player.id)}
                     />
                   ))}
                 </div>
@@ -288,9 +291,11 @@ type PlayerCardProps = {
   isMe: boolean
   canRemove: boolean
   onRemove: () => void
+  canTransfer?: boolean
+  onTransfer?: () => void
 }
 
-function PlayerCard({ player, isMe, canRemove, onRemove }: PlayerCardProps) {
+function PlayerCard({ player, isMe, canRemove, onRemove, canTransfer, onTransfer }: PlayerCardProps) {
   return (
     <div
       className={[
@@ -338,15 +343,28 @@ function PlayerCard({ player, isMe, canRemove, onRemove }: PlayerCardProps) {
         <span className="text-[10px] text-[#7a6f63]">déconnecté</span>
       )}
 
-      {/* Bouton retirer (présentateur uniquement, pas sur lui-même) */}
-      {canRemove && (
-        <button
-          onClick={onRemove}
-          title="Retirer ce joueur"
-          className="flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1 text-[10px] text-burgundy-500 transition-colors hover:bg-burgundy-500/10 hover:text-burgundy-400"
-        >
-          <DoorOpen size={12} />
-        </button>
+      {/* Actions (retirer / passer présentateur) — présentateur uniquement */}
+      {(canRemove || canTransfer) && (
+        <div className="flex items-center gap-1">
+          {canTransfer && (
+            <button
+              onClick={onTransfer}
+              title="Passer le rôle Présentateur à ce joueur"
+              className="flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1 text-[10px] text-brass-400 transition-colors hover:bg-brass-600/10 hover:text-brass-300"
+            >
+              <Crown size={12} />
+            </button>
+          )}
+          {canRemove && (
+            <button
+              onClick={onRemove}
+              title="Retirer ce joueur"
+              className="flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1 text-[10px] text-burgundy-500 transition-colors hover:bg-burgundy-500/10 hover:text-burgundy-400"
+            >
+              <DoorOpen size={12} />
+            </button>
+          )}
+        </div>
       )}
     </div>
   )

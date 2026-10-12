@@ -224,6 +224,31 @@ def remove_player(state: GameState, index: int, actor_role: Role) -> GameState:
     )
 
 
+def transfer_presenter(state: GameState, target_player_id: str, actor_role: Role) -> GameState:
+    """Transfère le rôle Présentateur à un joueur existant dans le lobby.
+
+    Met à jour is_presenter sur les deux joueurs concernés dans state.players.
+    Les champs room.roles et room.presentateur_id sont mis à jour par ws.py.
+    """
+    _require_role(actor_role, "presentateur")
+    if state.phase != "lobby":
+        raise GameError("invalid_phase", "Le transfert de Présentateur n'est possible qu'en lobby.")
+    # Trouver l'actuel présentateur et la cible
+    current_presenter = next((p for p in state.players if p.is_presenter), None)
+    target = next((p for p in state.players if p.id == target_player_id), None)
+    if target is None:
+        raise GameError("invalid_payload", "Joueur cible introuvable.")
+    if target.is_presenter:
+        raise GameError("invalid_payload", "Ce joueur est déjà le Présentateur.")
+    new_players = tuple(
+        replace(p, is_presenter=(p.id == target_player_id))
+        if p.id == target_player_id or (current_presenter and p.id == current_presenter.id)
+        else p
+        for p in state.players
+    )
+    return replace(state, players=new_players)
+
+
 def rename_player(
     state: GameState, actor_role: Role, actor_player_id: str, name: str
 ) -> GameState:

@@ -47,8 +47,9 @@ export type OutgoingMessage =
   | { type: 'game:reset'; payload: Record<string, never> }
   | { type: 'game:end_early'; payload: Record<string, never> }
   | { type: 'room:quit'; payload: Record<string, never> }
+  | { type: 'presenter:transfer'; payload: { targetPlayerId: string } }
 
-export type ConnectionStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'error'
+export type ConnectionStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'kicked' | 'error'
 
 export type RoomConnection = {
   status: ConnectionStatus
@@ -115,6 +116,9 @@ export function useRoomConnection(identity: Identity | null): RoomConnection {
       } else if (message.type === 'room:closed') {
         clearStoredIdentity()
         setStatus('closed')
+      } else if (message.type === 'player:kicked') {
+        clearStoredIdentity()
+        setStatus('kicked')
       }
     }
 
