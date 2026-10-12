@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Timer, CheckCircle2, XCircle, SkipForward, Sparkles, TrendingUp, TrendingDown } from 'lucide-react'
+import { Timer, CheckCircle2, XCircle, SkipForward } from 'lucide-react'
 import type { GameAction } from '../game/gameReducer'
 import type { GameState } from '../game/types'
 import { joueurs, currentJoueur, currentJoueurIndex } from '../game/types'
@@ -149,7 +149,7 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
                 le choix n'est pas ouvert. */}
             {isPresenter && state.tunnelSubPhase === 'after-success-pending' && (
               <Button variant="gold" onClick={handleRevealChoice}>
-                <span className="flex items-center gap-2"><Sparkles size={16} /> Lancer le choix</span>
+                Lancer le choix
               </Button>
             )}
 
@@ -165,10 +165,10 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
             {isCurrentPlayer && state.tunnelSubPhase === 'after-success-open' && (
               <>
                 <Button variant="primary" onClick={() => dispatch({ type: 'CONTINUE' })}>
-                  <span className="flex items-center gap-2"><TrendingUp size={16} /> Rester sur scène</span>
+                  Rester sur scène
                 </Button>
                 <Button variant="gold" onClick={handleCoffrer}>
-                  <span className="flex items-center gap-2"><TrendingDown size={16} /> Descendre</span>
+                  Descendre
                 </Button>
               </>
             )}
