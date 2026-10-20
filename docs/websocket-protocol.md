@@ -1,9 +1,15 @@
 ---
 status: draft
 created: 2026-10-11
+updated: 2026-10-20
 ---
 
-# Protocole WebSocket — mode room multi (Bloc 3)
+# Protocole WebSocket — mode room multi
+
+Contrat observé sur `d0d97ef2177467a0189d86fd8c3a090a0f8cae4e`, réaligné au
+premier jalon le 2026-10-20. Voir [le compte-rendu de validation](validation-jalon-1.md).
+Ce document décrit le comportement actuel, pas une garantie de sécurité des
+sessions ni de reprise après redémarrage (Blocs 13/14).
 
 **Mise à jour 2026-10-11 (chrono)** : ajout du sous-état `question-pending`
 entre la sélection du thème (ou "Continuer") et le lancement effectif du
@@ -15,13 +21,14 @@ temps côté joueur ("écoute la question" puis "attend le verdict").
 **Mise à jour 2026-10-11 (lobby unique)** : fusion des anciennes phases
 `menu` (attente joueurs) et `themes` (saisie des thèmes) en une seule phase
 `lobby` — un seul écran affiche simultanément la liste des joueurs, la
-saisie des thèmes par le Présentateur, et permet à chaque participant
-(Présentateur, Joueur, Écran principal) de renommer UNIQUEMENT lui-même via
+saisie des thèmes par le Présentateur, et permet à chaque entrée de `players`
+(Présentateur, Joueur) de renommer UNIQUEMENT elle-même via
 `player:rename`. Le message `lobby:go_to_themes` est supprimé ; `game:start`
-vérifie désormais les deux préconditions (`players.length >= 2` ET
-`themes.length >= 1`) en une seule fois. Le nom du Présentateur est exposé
-au client via le nouveau champ `presentateurName` du DTO `GameState`
-(il n'apparaît jamais dans `players`).
+vérifie désormais les deux préconditions (au moins deux joueurs hors
+Présentateur ET `themes.length >= 1`) en une seule fois. Depuis l'unification
+des participants, le Présentateur est dans `players` avec `isPresenter: true`,
+son nom et son avatar. Les anciens champs `presentateurName` et
+`presentateurAvatar` ne sont plus émis.
 
 **Mise à jour 2026-10-11 (présence/absence + fin anticipée)** : un Joueur
 peut désormais fermer sa connexion WebSocket sans quitter définitivement la
@@ -50,7 +57,8 @@ toujours.
    **Présentateur**. Réponse : `{code, localPlayerId, role: "presentateur"}`.
 2. **Rejoindre une room** : `POST /api/rooms/{code}/join` `{pseudo, role?}`
    (`role` ∈ `"joueur"` (défaut) | `"ecran-principal"`). Réponse :
-   `{code, localPlayerId, role}`.
+   `{code, localPlayerId, role, state}`. Le créateur Présentateur est déjà
+   présent dans `state.players`, contrairement à l'Écran principal.
    - Rejoindre en tant que `joueur` n'est accepté que tant que la partie est
      en lobby (`phase === "lobby"`) : ajoute immédiatement une entrée dans
      `players` via le moteur de règles.
@@ -66,7 +74,7 @@ toujours.
    l'étape REST précédente), attache la connexion, puis envoie immédiatement
    un message `room:state_sync` complet.
 4. **Échanges en cours de partie** : chaque action de jeu est un message
-   client→serveur avec enforcement de rôle strict (voir table ci-dessous).
+   client→serveur avec contrôles serveur de rôle (voir table et limites du transfert).
    Après chaque action acceptée, le serveur **rediffuse l'état complet** de
    la room à toutes les connexions actives (`room:state_sync` broadcast) —
    pas de diffs incrémentaux dans cette version.
@@ -80,10 +88,16 @@ toujours.
 - `localPlayerId` : UUID généré par le serveur à la création/jointure,
   renvoyé au client qui doit le conserver (`localStorage`) pour se
   reconnecter. Un seul `localPlayerId` par onglet/participant.
-- Rôles possibles : `presentateur` (exactement un par room, le créateur —
-  le transfert de rôle en lobby n'est **pas** implémenté dans cette passe,
-  voir Limitations connues), `joueur` (entrée dans `players`), `ecran-principal`
+- Rôles possibles : `presentateur` (exactement un par room, initialement le
+  créateur, transférable en lobby via `presenter:transfer` ; entrée dans
+  `players` avec `isPresenter: true`), `joueur` (entrée dans `players` avec
+  `isPresenter: false`), `ecran-principal`
   (lecture seule, jamais dans `players`).
+- `currentPlayerIndex` indexe le tableau **complet** `players`, pas une liste
+  filtrée. Identifier les participants par `id`, y compris après transfert ou
+  retrait. Le Présentateur n'est éligible ni au tour ni aux points/classement.
+  La rotation normale et `game:start` l'excluent ; les limites de `game:reset`
+  et des joueurs absents sont décrites plus bas, pas garanties par ce jalon.
 - Le serveur associe en interne chaque entrée `players[i]` à son
   `localPlayerId` d'origine (champ `id` dans le DTO `Player`, voir plus bas)
   — c'est ce qui permet au serveur de savoir si un message `theme:select`
@@ -116,12 +130,14 @@ type Theme = {
 }
 
 type Player = {
-  id: string        // localPlayerId d'origine — NOUVEAU vs le POC frontend-only
+  id: string        // localPlayerId d'origine
   name: string
   points: number
   // false si la connexion WS de ce joueur est actuellement fermée (il reste
   // dans le classement, mais son tour est sauté) — ajouté 2026-10-11.
   connected: boolean
+  avatar: string    // ID SVG, assigné automatiquement à la création/jointure
+  isPresenter: boolean
 }
 
 type GamePhase =
@@ -134,9 +150,6 @@ type HistoryEntry = { themeLabel: string; playerName: string; pointsGained: numb
 
 type GameState = {
   phase: GamePhase
-  // Nom d'affichage du Présentateur (n'apparaît jamais dans `players`) —
-  // ajouté 2026-10-11 pour que tous les participants voient qui présente.
-  presentateurName: string | null
   players: Player[]
   themes: Theme[]
   currentPlayerIndex: number
@@ -152,9 +165,11 @@ type GameState = {
 |-------------------|-------------------------|-------------------------------------------------|---------------------------------------------------------------------------|----------------------------------------------|
 | `theme:add`       | `{ label }`             | Présentateur                                    | `phase === 'lobby'`                                                       | `ADD_THEME`                                  |
 | `theme:remove`    | `{ index }`             | Présentateur                                    | `phase === 'lobby'`                                                       | `REMOVE_THEME`                               |
-| `player:remove`   | `{ index }`             | Présentateur                                    | `phase === 'lobby'`                                                       | `REMOVE_PLAYER`                              |
-| `player:rename`   | `{ name }`              | **N'importe quel rôle, sur lui-même uniquement** | `phase === 'lobby'`                                                       | `RENAME_SELF`                                |
-| `game:start`      | `{}`                    | Présentateur                                    | `phase === 'lobby'`, `players.length >= 2`, `themes.length >= 1`          | `START_GAME`                                 |
+| `player:remove`   | `{ index }`             | Présentateur                                    | `phase === 'lobby'`, index du tableau complet, cible non Présentateur       | `REMOVE_PLAYER`                              |
+| `player:rename`   | `{ name }`              | Joueur ou Présentateur, sur lui-même uniquement | `phase === 'lobby'`, nom non vide après trim                               | `RENAME_SELF`                                |
+| `player:set_avatar` | `{ avatar }`          | Participant de `players`, sur lui-même           | `phase === 'lobby'`, avatar autorisé, libre ou déjà à soi                    | `SET_SELF_AVATAR`                            |
+| `presenter:transfer` | `{ targetPlayerId }` | Présentateur                                    | `phase === 'lobby'`, cible existante dans `players`, non Présentateur         | `TRANSFER_PRESENTER`                         |
+| `game:start`      | `{}`                    | Présentateur                                    | `phase === 'lobby'`, au moins 2 joueurs hors Présentateur, au moins 1 thème    | `START_GAME`                                 |
 | `choice:reveal`   | `{}`                    | Présentateur                                    | `phase === 'selection-pending'` OU `tunnelSubPhase === 'after-success-pending'` | `REVEAL_CHOICE`                         |
 | `theme:select`    | `{ index }`             | **Joueur concerné** (`players[currentPlayerIndex].id`) | `phase === 'selection'` (choice_open), thème visé non `completed`    | `SELECT_THEME`                               |
 | `timer:start`     | `{}`                    | Présentateur                                    | `phase === 'tunnel'`, `tunnelSubPhase === 'question-pending'`              | *(nouveau — pas d'équivalent POC)*           |
@@ -172,7 +187,7 @@ strictement égal à `players[currentPlayerIndex].id` au moment du message. Tout
 autre connexion de rôle `joueur` tentant la même action reçoit `error` avec
 `code: "not_your_turn"`.
 
-Toute action envoyée par un rôle non autorisé reçoit `error` avec
+Les actions de jeu envoyées par un rôle non autorisé reçoivent `error` avec
 `code: "forbidden_role"`. Toute action envoyée alors que la précondition
 d'état n'est pas remplie reçoit `error` avec `code: "invalid_phase"`
 (ex. `theme:select` reçu alors que `phase === 'selection-pending'` — le choix
@@ -184,6 +199,29 @@ Note sur `player:add` : volontairement absent de cette table. En mode multi,
 un joueur rejoint la room avec son propre pseudo via `POST
 /api/rooms/{code}/join` (étape REST, pas un message WS) — il n'y a pas de
 action WS équivalente à l'ancien `ADD_PLAYER` du POC hotseat.
+
+Avatars autorisés : `alice`, `bob`, `charlie`, `diana`, `edgar`, `flora`,
+`gareth`, `hannah`, `ivan`, `julia`, `kevin`, `luna`, `marco`, `nina`, `oscar`,
+`petra`. Ils correspondent aux SVG de `frontend/public/avatars`. Un avatar
+libre est attribué aléatoirement ; la limite est de 16 participants dans
+`players` (Présentateur inclus, Écran principal exclu). Avatar inconnu ou
+déjà pris : `invalid_payload`. Les actions d'identité ne changent pas les
+autres participants. Un Écran principal n'a pas d'identité dans `players` :
+son renommage est actuellement refusé (`invalid_payload`), et un changement
+d'avatar n'a pas d'effet, sans garantie de rejet explicite (Bloc 13).
+
+Le retrait accepté émet `player:kicked` uniquement vers la cible connectée,
+ferme sa socket puis diffuse l'état sans cette entrée. Le retrait du
+Présentateur est refusé (`invalid_payload`). Cela **ne révoque pas encore**
+l'identité stockée dans `room.roles` : ne pas assimiler retrait visuel et
+révocation d'accès (Bloc 13).
+
+Le transfert met à jour `isPresenter`, `room.roles`, `room.presentateur_id`
+et le `role` envoyé à chaque destinataire ; noms, avatars et identifiants
+restent inchangés. Le handler actuel envoie deux `room:state_sync` identiques
+par connexion. **Les permissions sur les sockets déjà ouvertes restent
+capturées avant transfert** : l'affichage du nouveau rôle ne prouve donc pas
+son enforcement. Correction et validation des permissions différées au Bloc 13.
 
 Note sur `game:end_early` vs `game:reset` vs `room:quit` : les trois
 réinitialisent scores/progression, mais diffèrent sur la phase cible et la
@@ -199,6 +237,7 @@ connexions sont closes, l'état est supprimé du `RoomManager`).
 |-------------------|------------------------------------------------------------------|-----------------------------------------------------------|
 | `room:state_sync` | À chaque connexion WS ouverte, et après chaque action acceptée (broadcast à toute la room) | `{ code, role, localPlayerId, state: GameState }` — `role`/`localPlayerId` sont spécifiques au destinataire, `state` est identique pour tous |
 | `room:closed`     | Après un `room:quit` accepté, avant fermeture des connexions      | `{}`                                                       |
+| `player:kicked`   | Retrait accepté, uniquement vers le participant retiré avant fermeture de sa socket | `{}` |
 | `error`           | Après une action rejetée (rôle ou phase invalide), envoyé **uniquement au client fautif** | `{ code: "forbidden_role" \| "not_your_turn" \| "invalid_phase" \| "invalid_payload" \| "room_not_found", message: string }` |
 
 ## Reconnexion (process serveur toujours vivant)
@@ -231,17 +270,23 @@ partie :
    — pas besoin d'attendre une action quelconque d'un autre participant.
 2. Le joueur absent reste visible dans le classement (`ScoreBoard`, écran de
    fin) avec ses points actuels, affiché grisé côté client.
-3. La rotation des tours (`currentPlayerIndex`) saute automatiquement tout
-   joueur `connected: false` — l'ordre de jeu lui-même (la liste `players`)
+3. Tant qu'au moins un joueur est éligible, la rotation des tours
+   (`currentPlayerIndex`) saute les joueurs `connected: false` et le
+   Présentateur — l'ordre de jeu lui-même (la liste `players`)
    n'est jamais modifié, seul le calcul du prochain joueur actif en tient
    compte.
 4. À la reconnexion avec le **même** `localPlayerId` (même room, même code
    client), le joueur redevient `connected: true` et peut reprendre son tour
    normalement s'il retombe dessus — aucun rattrapage automatique des tours
    manqués pendant son absence.
-5. Cela ne s'applique pas au Présentateur ni à l'Écran principal (jamais
-   présents dans `players`) : leur déconnexion n'a aucun effet sur l'état de
-   la partie dans cette passe.
+5. Le Présentateur est lui aussi marqué `connected: false` à sa déconnexion,
+   puis `true` à son retour. L'Écran principal n'est pas dans `players`.
+   La reconnexion d'une entrée absente peut produire un broadcast de présence
+   **et** une synchronisation initiale sur la nouvelle socket. Le client doit
+   accepter ces états répétés. La déconnexion du joueur actif ne réattribue
+   pas immédiatement le tour ; seules les transitions de rotation sautent
+   les absents. Si tous les joueurs sont absents, le repli de rotation peut
+   pointer sur une entrée inéligible (fiabilisation Bloc 13).
 
 ## Limitations connues de cette passe (à lever dans une passe ultérieure)
 
@@ -249,12 +294,13 @@ partie :
   les rooms et parties en cours sont perdues. Bloc 2 (schéma + Alembic) et la
   persistance aux transitions clés (Bloc 5 version complète) ajouteront la
   survie au redémarrage et l'historique consultable après coup.
-- **Pas de transfert de Présentateur en lobby** : la décision produit prévoit
-  que le Présentateur puisse désigner un autre participant avant le début de
-  partie ; ce message WS (`room:transfer_presentateur` ou équivalent) n'est
-  pas implémenté dans cette passe — un seul Présentateur fixe (le créateur de
-  la room) pour l'instant.
+- **Sessions et permissions non consolidées (Bloc 13)** : les identifiants
+  publics servent encore à la reprise, le retrait ne révoque pas l'identité,
+  et les permissions peuvent rester périmées après transfert. Pas de preuve
+  de protection contre l'usurpation. `game:reset` remet actuellement l'index
+  de tour à zéro, qui peut être celui du Présentateur ; Rejouer ne fait pas
+  partie du scénario de référence validé. Ne pas présenter le multi comme
+  sécurisé ni tous les parcours de relance comme validés.
 - **Pas de banque de thèmes prédéfinis ni d'historique/stats** : hors scope
   de cette passe, prévus respectivement en Bloc 4 (endpoints REST
   complémentaires) et Bloc 2/5 (persistance).
-</content>

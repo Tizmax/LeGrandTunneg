@@ -5,7 +5,7 @@ pilote la partie et un écran collectif suivi par les joueurs sur leurs propres
 appareils.
 
 Pour le détail complet du projet (règles de jeu, décisions produit, modèle de
-données, plan d'exécution en 11 blocs), voir l'exec-plan de référence :
+données et plan d'exécution), voir l'exec-plan de référence :
 [`docs/exec-plans/reconstruction-le-grand-tunneg.md`](docs/exec-plans/reconstruction-le-grand-tunneg.md).
 
 ## Structure du repo
@@ -70,6 +70,32 @@ profil.
 persistance Postgres, voir Bloc 2) : un redémarrage du backend efface toutes
 les parties en cours.
 
+## Validation et CI
+
+Depuis la racine, avec les dépendances installées :
+
+```bash
+(cd backend && timeout 120s .venv/bin/python -m pytest -q)
+(cd frontend && npm run lint && npm run build)
+```
+
+`npm run lint` utilise Oxlint. Le timeout pytest borne aussi les attentes
+WebSocket ; code 124 signifie un timeout, pas un succès. Sur un système sans
+`timeout`, utiliser un équivalent avec échec explicite à expiration.
+
+Le workflow [CI](.github/workflows/ci.yml) exécute les tests sous Python 3.12
+et Oxlint + build sous Node 22.22.1 à chaque push et pull request. Ces versions
+sont compatibles avec le Dockerfile (Python 3.12, Node 22) et les engines npm.
+Les deux jobs doivent réussir ; aucun échec n'est ignoré.
+
+- [Protocole REST/WebSocket actuel](docs/websocket-protocol.md).
+- [Référence validée, baseline et limites du premier jalon](docs/validation-jalon-1.md).
+
+Un workflow versionné n'active **pas** à lui seul les checks de fusion ni
+l'attente de la CI côté Railway. Leur configuration et la preuve de blocage
+d'une révision rouge restent à établir par le responsable des accès distants,
+selon la procédure du compte-rendu. Aucun gate distant n'est déclaré validé.
+
 ## Déploiement (Railway)
 
 Le projet se déploie comme un service unique : un seul process FastAPI sert
@@ -93,7 +119,9 @@ buildé et sert tout via `uvicorn`).
 2. Sur [railway.app](https://railway.app) : **New Project → Deploy from GitHub repo**, sélectionner ce repo.
 3. Railway détecte le `Dockerfile` à la racine (confirmé par `railway.toml`, builder `DOCKERFILE`) et lance le build automatiquement.
 4. Une fois déployé, Railway fournit une URL publique HTTPS/WSS unique — vérifier `/health` pour confirmer que le service tourne.
-5. Chaque `git push` sur la branche connectée redéploie automatiquement (CI/CD continu).
+5. Chaque `git push` sur la branche connectée peut déclencher un déploiement.
+   Activer et vérifier l'attente des checks CI côté Railway avant de considérer
+   la livraison comme protégée ; le health check `/health` ne remplace pas la CI.
 
 ### Tester le build de production en local (sans Railway)
 

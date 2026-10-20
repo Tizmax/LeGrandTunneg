@@ -272,11 +272,19 @@ def test_player_can_rename_self_in_lobby() -> None:
     assert other.name != "Nouveau nom"
 
 
-def test_rename_rejected_for_non_joueur_role() -> None:
+def test_presenter_can_rename_self_in_lobby() -> None:
+    state = two_player_lobby()
+    state = engine.add_player(state, "host", "Paul", is_presenter=True)
+    renamed = engine.rename_player(state, "presentateur", "host", "Paulo")
+    assert next(p for p in renamed.players if p.id == "host").name == "Paulo"
+    assert renamed.players[:2] == state.players[:2]
+
+
+def test_rename_rejected_for_unknown_participant() -> None:
     state = two_player_lobby()
     with pytest.raises(engine.GameError) as exc_info:
-        engine.rename_player(state, "presentateur", "p1", "x")
-    assert exc_info.value.code == "forbidden_role"
+        engine.rename_player(state, "ecran-principal", "screen", "x")
+    assert exc_info.value.code == "invalid_payload"
 
 
 def test_rename_rejected_outside_lobby() -> None:
@@ -307,11 +315,31 @@ def test_start_game_rejected_without_themes_even_with_enough_players() -> None:
 
 def test_start_game_rejected_without_enough_players_even_with_themes() -> None:
     state = GameState()
+    state = engine.add_player(state, "host", "Paul", is_presenter=True)
     state = engine.add_player(state, "p1", "Alice")
     state = engine.add_theme(state, "Cinéma", "presentateur")
     with pytest.raises(engine.GameError) as exc_info:
         engine.start_game(state, "presentateur")
     assert exc_info.value.code == "invalid_payload"
+
+
+@pytest.mark.parametrize("seed", range(10))
+def test_start_and_rotation_exclude_presenter(seed: int) -> None:
+    state = engine.add_player(GameState(), "host", "Paul", is_presenter=True)
+    state = engine.add_player(state, "p1", "Alice")
+    state = engine.add_player(state, "p2", "Bob")
+    state = engine.add_theme(state, "Musique", "presentateur")
+    state = engine.start_game(state, "presentateur", rng=random.Random(seed))
+    first_id = current_player_id(state)
+    assert first_id in {"p1", "p2"}
+    for _ in range(4):
+        pid = current_player_id(state)
+        state = engine.reveal_choice(state, "presentateur")
+        state = select_and_start(state, 0, pid)
+        state = engine.bad_answer(state, "presentateur")
+        assert current_player_id(state) in {"p1", "p2"} - {pid}
+        assert next(p for p in state.players if p.id == "host").points == 0
+    assert current_player_id(state) == first_id
 
 
 # --- Reset vs quitter ---------------------------------------------------------

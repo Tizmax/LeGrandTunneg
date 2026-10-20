@@ -25,8 +25,6 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
   const currentPlayer = currentJoueur(state)
   const { playEffect } = useAudio()
 
-  if (!theme) return null
-
   const isPresenter = role === 'presentateur'
   // Seul le joueur dont c'est le tour peut voir Continuer/Coffrer — un autre
   // joueur ne reçoit que le message d'attente ci-dessous (le serveur
@@ -34,11 +32,12 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
   const isCurrentPlayer = role === 'joueur' && currentPlayer?.id === localPlayerId
 
   // ── Son d'entrée dans le tunnel (accent dramatique) ───────────────────────
-  // eslint-disable-next-line react-hooks/rules-of-hooks
   useEffect(() => {
-    playEffect('theme_start')
+    if (state.activeThemeIndex !== null) playEffect('theme_start')
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.activeThemeIndex])
+
+  if (!theme) return null
 
   // ─── Wrappers dispatch avec effets sonores ─────────────────────────────────
 
