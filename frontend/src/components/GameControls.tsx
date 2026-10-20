@@ -10,6 +10,7 @@ type GameControlsProps = {
    * l'accueil) — réservé au Joueur. Le Présentateur dispose du menu settings
    * à la place (ramène tout le monde au lobby, ne ferme rien). */
   onLeave: () => void
+  canReset?: boolean
 }
 
 /**
@@ -20,7 +21,7 @@ type GameControlsProps = {
  * - Joueur : icône porte (quitter individuellement).
  * L'Écran principal n'a aucun contrôle ici.
  */
-export function GameControls({ dispatch, role, onLeave }: GameControlsProps) {
+export function GameControls({ dispatch, role, onLeave, canReset = true }: GameControlsProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -65,6 +66,7 @@ export function GameControls({ dispatch, role, onLeave }: GameControlsProps) {
                 <MenuAction
                   icon={<RotateCcw size={14} />}
                   label="Réinitialiser"
+                  disabled={!canReset}
                   description="Remet tous les scores à zéro"
                   color="text-[#d8c9b0]"
                   onClick={() => {
@@ -110,7 +112,7 @@ export function GameControls({ dispatch, role, onLeave }: GameControlsProps) {
         <button
           title="Quitter la partie"
           onClick={() => {
-            if (window.confirm('Quitter la partie ? Vous pourrez rejoindre à nouveau avec le même code.')) {
+            if (window.confirm('Se déconnecter ? Votre session sera conservée pour une reprise explicite.')) {
               onLeave()
             }
           }}
@@ -131,12 +133,14 @@ type MenuActionProps = {
   description: string
   color: string
   onClick: () => void
+  disabled?: boolean
 }
 
-function MenuAction({ icon, label, description, color, onClick }: MenuActionProps) {
+function MenuAction({ icon, label, description, color, onClick, disabled }: MenuActionProps) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       className={[
         'flex w-full cursor-pointer items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-white/5',
         color,

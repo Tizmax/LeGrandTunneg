@@ -15,7 +15,7 @@ export type Player = {
   name: string
   points: number
   // Présence réseau : un joueur déconnecté reste affiché (classement final)
-  // mais son tour est sauté côté serveur (voir docs/websocket-protocol.md).
+  // et conserve son tour en cours jusqu'à son retour.
   connected: boolean
   // ID de l'avatar SVG DiceBear choisi dans le lobby (ex. "alice", "bob").
   // Toujours assigné au join (tirage aléatoire), modifiable en lobby.
@@ -42,6 +42,8 @@ export type TunnelSubPhase =
 
 export type SquareColor = 'black' | 'gray' | 'green' | 'yellow' | 'empty'
 
+export type TurnStatus = 'idle' | 'ready' | 'active-absent' | 'waiting-eligible'
+
 export type HistoryEntry = {
   themeLabel: string
   playerName: string
@@ -54,7 +56,9 @@ export type GameState = {
   // Le présentateur est identifiable via player.isPresenter === true.
   players: Player[]
   themes: Theme[]
-  currentPlayerIndex: number
+  currentPlayerIndex: number | null
+  turnStatus: TurnStatus
+  rotationAnchorIndex: number | null
   activeThemeIndex: number | null
   tunnelSubPhase: TunnelSubPhase | null
   history: HistoryEntry[]
@@ -74,6 +78,7 @@ export function joueurs(state: GameState): Player[] {
  * en jeu normal, mais protège contre les états transitoires).
  */
 export function currentJoueur(state: GameState): Player | null {
+  if (state.currentPlayerIndex === null) return null
   const p = state.players[state.currentPlayerIndex] ?? null
   return p && !p.isPresenter ? p : null
 }
@@ -82,8 +87,9 @@ export function currentJoueur(state: GameState): Player | null {
  * Retourne l'index du joueur actif dans le tableau filtré joueurs(state),
  * pour l'affichage dans ScoreBoard (qui n'inclut pas le présentateur).
  */
-export function currentJoueurIndex(state: GameState): number {
-  const current = state.players[state.currentPlayerIndex]
-  if (!current || current.isPresenter) return 0
-  return joueurs(state).findIndex((p) => p.id === current.id)
+export function currentJoueurIndex(state: GameState): number | null {
+  const current = currentJoueur(state)
+  if (!current) return null
+  const index = joueurs(state).findIndex((p) => p.id === current.id)
+  return index >= 0 ? index : null
 }

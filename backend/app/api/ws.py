@@ -1,353 +1,232 @@
-"""Handler WebSocket /ws/{code} — Bloc 5 (scope mémoire, sans persistance).
+"""Authenticated, bounded WebSocket protocol with live socket authority."""
 
-Implémente le protocole documenté dans docs/websocket-protocol.md : enveloppe
-`{type, payload}`, dispatch vers `app.game.engine`, broadcast `room:state_sync`
-à toute la room après chaque action acceptée, `error` ciblé au seul client
-fautif en cas de rejet (rôle incorrect, mauvais tour, phase invalide, payload
-invalide) sans aucune mutation d'état ni diffuser de broadcast dans ce cas.
+import asyncio
+import json
 
-Unification 2026-10-12 : le Présentateur apparaît dans state.players avec
-is_presenter=True. Plus de chemins séparés pour présentateur/joueur.
-"""
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 
-from __future__ import annotations
-
-import logging
-from typing import Any, Callable
-
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
-
+from app.api.rooms import valid_proof
+from app.core.limits import TokenBucket
+from app.core.settings import settings
 from app.game import engine
-from app.game.serialize import serialize_state
-from app.game.types import GameState
-from app.rooms.manager import RoomNotFoundError, UnknownParticipantError, room_manager
-
-logger = logging.getLogger(__name__)
+from app.rooms.manager import CapacityError, RoomNotFoundError, UnknownParticipantError, room_manager
 
 router = APIRouter()
+upgrade_bucket = TokenBucket(settings.ws_upgrade_rate_per_second, settings.ws_upgrade_rate_burst)
+global_bucket = TokenBucket(settings.ws_global_rate_per_second, settings.ws_global_rate_burst)
 
-
-async def _send_error(websocket: WebSocket, code: str, message: str) -> None:
-    await websocket.send_json({"type": "error", "payload": {"code": code, "message": message}})
-
-
-async def _send_state_sync(
-    websocket: WebSocket,
-    code: str,
-    role: str,
-    local_player_id: str,
-    state: GameState,
-) -> None:
-    await websocket.send_json(
-        {
-            "type": "room:state_sync",
-            "payload": {
-                "code": code,
-                "role": role,
-                "localPlayerId": local_player_id,
-                "state": serialize_state(state),
-            },
-        }
-    )
-
-
-async def _broadcast_state(code: str) -> None:
-    # Délégué à RoomManager.broadcast_state, partagé avec la route REST
-    # POST /api/rooms/{code}/join qui doit aussi notifier les connexions WS
-    # déjà actives (voir app/rooms/manager.py).
-    await room_manager.broadcast_state(code)
-
-
-async def _broadcast_closed(code: str) -> None:
-    room = room_manager.get_room(code)
-    for conn in list(room.connections.values()):
-        try:
-            await conn.send_json({"type": "room:closed", "payload": {}})
-            await conn.close()
-        except Exception:
-            pass
-
-
-# --- Dispatch table : type de message -> fonction moteur -------------------
-#
-# Chaque handler reçoit (state, payload, role, local_player_id) et renvoie le
-# nouvel état, ou lève engine.GameError. Les actions Présentateur ignorent
-# local_player_id ; les actions "joueur concerné" l'utilisent pour vérifier
-# players[current_player_index].id == local_player_id (fait par engine.py).
-
-
-def _h_theme_add(state: GameState, payload: dict, role: str, pid: str) -> GameState:
-    return engine.add_theme(state, payload.get("label", ""), role)
-
-
-def _h_theme_remove(state: GameState, payload: dict, role: str, pid: str) -> GameState:
-    return engine.remove_theme(state, _require_int(payload, "index"), role)
-
-
-def _h_player_remove(state: GameState, payload: dict, role: str, pid: str) -> GameState:
-    return engine.remove_player(state, _require_int(payload, "index"), role)
-
-
-def _h_presenter_transfer(state: GameState, payload: dict, role: str, pid: str) -> GameState:
-    return engine.transfer_presenter(state, _require_str(payload, "targetPlayerId"), role)
-
-
-def _h_game_start(state: GameState, payload: dict, role: str, pid: str) -> GameState:
-    return engine.start_game(state, role)
-
-
-def _h_choice_reveal(state: GameState, payload: dict, role: str, pid: str) -> GameState:
-    return engine.reveal_choice(state, role)
-
-
-def _h_theme_select(state: GameState, payload: dict, role: str, pid: str) -> GameState:
-    return engine.select_theme(state, _require_int(payload, "index"), role, pid)
-
-
-def _h_timer_start(state: GameState, payload: dict, role: str, pid: str) -> GameState:
-    return engine.start_timer(state, role)
-
-
-def _h_answer_good(state: GameState, payload: dict, role: str, pid: str) -> GameState:
-    return engine.good_answer(state, role)
-
-
-def _h_answer_bad(state: GameState, payload: dict, role: str, pid: str) -> GameState:
-    return engine.bad_answer(state, role)
-
-
-def _h_answer_pass(state: GameState, payload: dict, role: str, pid: str) -> GameState:
-    return engine.pass_question(state, role)
-
-
-def _h_answer_continue(state: GameState, payload: dict, role: str, pid: str) -> GameState:
-    return engine.continue_tunnel(state, role, pid)
-
-
-def _h_answer_vault(state: GameState, payload: dict, role: str, pid: str) -> GameState:
-    return engine.vault(state, role, pid)
-
-
-def _h_game_reset(state: GameState, payload: dict, role: str, pid: str) -> GameState:
-    return engine.reset_game(state, role)
-
-
-def _h_game_end_early(state: GameState, payload: dict, role: str, pid: str) -> GameState:
-    return engine.end_game_early(state, role)
-
-
-def _require_int(payload: dict, key: str) -> int:
-    value = payload.get(key)
-    if not isinstance(value, int):
-        raise engine.GameError("invalid_payload", f"Champ '{key}' manquant ou invalide.")
-    return value
-
-
-def _require_str(payload: dict, key: str) -> str:
-    value = payload.get(key)
-    if not isinstance(value, str) or not value:
-        raise engine.GameError("invalid_payload", f"Champ '{key}' manquant ou invalide.")
-    return value
-
-
-_HANDLERS: dict[str, Callable[[GameState, dict, str, str], GameState]] = {
-    "theme:add": _h_theme_add,
-    "theme:remove": _h_theme_remove,
-    # "player:remove" traité à part : envoie player:kicked ciblé avant broadcast
-    # "presenter:transfer" traité à part : met à jour room.roles / room.presentateur_id
-    "game:start": _h_game_start,
-    # "player:rename" et "player:set_avatar" sont traités à part (ci-dessous)
-    # car ils nécessitent le local_player_id directement, pas juste le rôle.
-    "choice:reveal": _h_choice_reveal,
-    "theme:select": _h_theme_select,
-    "timer:start": _h_timer_start,
-    "answer:good": _h_answer_good,
-    "answer:bad": _h_answer_bad,
-    "answer:pass": _h_answer_pass,
-    "answer:continue": _h_answer_continue,
-    "answer:vault": _h_answer_vault,
-    "game:reset": _h_game_reset,
-    "game:end_early": _h_game_end_early,
-    # "room:quit" est traité à part : il ferme la room plutôt que de
-    # simplement muter l'état (voir boucle principale ci-dessous).
+_EMPTY = {
+    "game:start": engine.start_game, "choice:reveal": engine.reveal_choice,
+    "timer:start": engine.start_timer, "answer:good": engine.good_answer,
+    "answer:bad": engine.bad_answer, "answer:pass": engine.pass_question,
+    "game:reset": engine.reset_game, "game:end_early": engine.end_game_early,
 }
+_FIELDS = {"theme:add": "label", "theme:remove": "index", "theme:select": "index",
+           "player:remove": "index", "player:rename": "name", "player:set_avatar": "avatar",
+           "presenter:transfer": "targetPlayerId"}
+_OTHERS = {"room:quit", "answer:continue", "answer:vault"}
+
+
+def invalid() -> None:
+    raise engine.GameError("invalid_payload", "Invalid message.")
+
+
+async def receive(socket: WebSocket) -> dict:
+    frame = await socket.receive()
+    if frame["type"] == "websocket.disconnect":
+        raise WebSocketDisconnect(frame.get("code", 1000))
+    text = frame.get("text")
+    try:
+        raw = text.encode("utf-8") if text is not None else frame.get("bytes", b"")
+    except UnicodeError:
+        invalid()
+    if len(raw) > settings.max_message_bytes:
+        raise OverflowError
+    if text is None:
+        invalid()
+    try:
+        message = json.loads(text)
+    except (ValueError, UnicodeError, RecursionError):
+        invalid()
+    if (not isinstance(message, dict) or set(message) != {"type", "payload"}
+            or not isinstance(message["type"], str) or not isinstance(message["payload"], dict)):
+        invalid()
+    return message
+
+
+def validate(message: dict, room) -> tuple[str, dict]:
+    event, payload = message["type"], message["payload"]
+    if event in _EMPTY or event in _OTHERS:
+        if payload:
+            invalid()
+    elif event in _FIELDS:
+        key = _FIELDS[event]
+        if set(payload) != {key}:
+            invalid()
+        value = payload[key]
+        if key == "index":
+            count = len(room.state.players) if event == "player:remove" else len(room.state.themes)
+            if type(value) is not int or not 0 <= value < count:
+                invalid()
+        elif key in ("label", "name"):
+            maximum = settings.max_name_chars if key == "name" else settings.max_theme_label_chars
+            if not isinstance(value, str) or not 1 <= len(value.strip()) <= maximum:
+                invalid()
+            try:
+                value.encode("utf-8")
+            except UnicodeError:
+                invalid()
+            payload = {key: value.strip()}
+        elif key == "avatar":
+            if not isinstance(value, str) or value not in engine._ALLOWED_AVATARS_SET:
+                invalid()
+        elif not valid_proof({"localPlayerId": value, "sessionToken": "A" * 43}):
+            invalid()
+    else:
+        invalid()
+    return event, payload
+
+
+async def deny(socket: WebSocket, status: int) -> None:
+    if "websocket.http.response" in socket.scope.get("extensions", {}):
+        await socket.send_denial_response(JSONResponse({"detail": {"code": "rate_limited" if status == 429 else "forbidden_origin",
+                                                                   "message": "Connection refused."}}, status_code=status))
+    else:
+        await socket.close(code=1008)
 
 
 @router.websocket("/ws/{code}")
-async def websocket_endpoint(websocket: WebSocket, code: str, local_player_id: str) -> None:
-    code = code.upper()
-    try:
-        room = room_manager.attach_connection(code, local_player_id, websocket)
-    except RoomNotFoundError:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="room_not_found")
+async def websocket_endpoint(websocket: WebSocket, code: str) -> None:
+    origins = websocket.headers.getlist("origin")
+    if len(origins) != 1 or origins[0] not in settings.allowed_origins or websocket.query_params:
+        await deny(websocket, 403)
         return
-    except UnknownParticipantError:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="unknown_participant")
+    if (not upgrade_bucket.consume()
+            or room_manager.preauth_connections >= settings.max_preauth_connections
+            or len(room_manager.authenticated_connections) >= settings.max_authenticated_connections):
+        await deny(websocket, 429)
         return
-
-    await websocket.accept()
-    role = room.roles[local_player_id]
-
-    # Un participant qui se (re)connecte redevient `connected=True`.
-    # Cela s'applique désormais aussi au présentateur (il est dans state.players).
-    async with room.lock:
-        previous_state = room.state
-        room.state = engine.set_player_connected(room.state, local_player_id, True)
-        changed = room.state is not previous_state
-    if changed:
-        await _broadcast_state(code)
-
-    await _send_state_sync(
-        websocket, code, role, local_player_id, room.state,
-    )
-
+    room_manager.preauth_connections += 1
+    reserved = True
+    room, pid = None, None
     try:
+        await websocket.accept()
+        try:
+            async with asyncio.timeout(settings.auth_timeout_seconds):
+                auth = await receive(websocket)
+                if auth["type"] != "session:auth" or set(auth["payload"]) != {"localPlayerId", "sessionToken"} or not valid_proof(auth["payload"]):
+                    invalid()
+                pid = auth["payload"]["localPlayerId"]
+                room = room_manager.get_room(code)
+                async with room.lock:
+                    previous = room_manager.attach_locked(room, pid, auth["payload"]["sessionToken"], websocket)
+                del auth
+        except TimeoutError:
+            await room_manager.close_socket(websocket, 4408, "auth_timeout")
+            return
+        except engine.GameError:
+            await room_manager.close_socket(websocket, 1008, "invalid_payload")
+            return
+        except RoomNotFoundError:
+            await room_manager.terminal(None, websocket, "room_closed")
+            return
+        except UnknownParticipantError:
+            await room_manager.terminal(None, websocket, "session_revoked")
+            return
+        except CapacityError:
+            await room_manager.close_socket(websocket, 4429, "rate_limited")
+            return
+        room_manager.preauth_connections -= 1
+        reserved = False
+        if previous:
+            await room_manager.terminal(room, previous, "session_replaced")
+        delivery = room.deliveries[websocket]
+        await asyncio.wait_for(delivery.acknowledged.wait(), settings.send_timeout_seconds)
+        bucket = TokenBucket(settings.ws_command_rate_per_second, settings.ws_command_rate_burst)
         while True:
-            message: dict[str, Any] = await websocket.receive_json()
-            msg_type = message.get("type")
-            payload = message.get("payload") or {}
-
-            if msg_type == "room:quit":
-                async with room.lock:
-                    try:
-                        engine.quit_to_menu(room.state, role)
-                    except engine.GameError as exc:
-                        await _send_error(websocket, exc.code, exc.message)
-                        continue
-                    await _broadcast_closed(code)
-                    room_manager.close_room(code)
-                return
-
-            if msg_type == "player:rename":
-                # Tous les participants (joueur et présentateur) renomment via l'engine.
-                name = payload.get("name", "")
-                async with room.lock:
-                    try:
-                        room_manager.rename_participant(code, local_player_id, name, role)
-                    except engine.GameError as exc:
-                        await _send_error(websocket, exc.code, exc.message)
-                        continue
-                    except (ValueError, UnknownParticipantError) as exc:
-                        await _send_error(websocket, "invalid_payload", str(exc))
-                        continue
-                    await _broadcast_state(code)
-                continue
-
-            if msg_type == "player:set_avatar":
-                # Tous les participants passent par engine.set_player_avatar.
-                avatar = payload.get("avatar", "")
-                async with room.lock:
-                    try:
-                        room.state = engine.set_player_avatar(
-                            room.state, local_player_id, avatar
-                        )
-                    except engine.GameError as exc:
-                        await _send_error(websocket, exc.code, exc.message)
-                        continue
-                    await _broadcast_state(code)
-                continue
-
-            if msg_type == "player:remove":
-                # Traitement spécial : envoyer player:kicked au joueur retiré
-                # avant le broadcast général, puis fermer sa connexion.
-                index = payload.get("index")
-                if not isinstance(index, int):
-                    await _send_error(websocket, "invalid_payload", "Champ 'index' manquant ou invalide.")
-                    continue
-                async with room.lock:
-                    try:
-                        kicked_player = room.state.players[index] if 0 <= index < len(room.state.players) else None
-                        room.state = engine.remove_player(room.state, index, role)
-                    except engine.GameError as exc:
-                        await _send_error(websocket, exc.code, exc.message)
-                        continue
-                    # Notifier le joueur kické (si sa connexion WS est active)
-                    if kicked_player:
-                        kicked_conn = room.connections.get(kicked_player.id)
-                        if kicked_conn:
-                            try:
-                                await kicked_conn.send_json({"type": "player:kicked", "payload": {}})
-                                await kicked_conn.close()
-                            except Exception:
-                                pass
-                            room.connections.pop(kicked_player.id, None)
-                    await _broadcast_state(code)
-                continue
-
-            if msg_type == "presenter:transfer":
-                # Transfert du rôle Présentateur à un joueur existant.
-                # Met à jour room.roles et room.presentateur_id, et met à jour
-                # is_presenter dans state.players via engine.transfer_presenter.
-                target_id = payload.get("targetPlayerId", "")
-                if not isinstance(target_id, str) or not target_id:
-                    await _send_error(websocket, "invalid_payload", "Champ 'targetPlayerId' manquant.")
-                    continue
-                async with room.lock:
-                    try:
-                        room.state = engine.transfer_presenter(room.state, target_id, role)
-                    except engine.GameError as exc:
-                        await _send_error(websocket, exc.code, exc.message)
-                        continue
-                    # Mettre à jour les rôles en mémoire dans la room
-                    old_presenter_id = room.presentateur_id
-                    if old_presenter_id:
-                        room.roles[old_presenter_id] = "joueur"
-                    room.roles[target_id] = "presentateur"
-                    room.presentateur_id = target_id
-                    await _broadcast_state(code)
-                    # Envoyer un state_sync ciblé à chaque participant pour
-                    # mettre à jour son `role` dans le payload
-                    for pid_conn, conn in list(room.connections.items()):
-                        r = room.roles.get(pid_conn, "joueur")
-                        try:
-                            await conn.send_json({
-                                "type": "room:state_sync",
-                                "payload": {
-                                    "code": code,
-                                    "role": r,
-                                    "localPlayerId": pid_conn,
-                                    "state": serialize_state(room.state),
-                                },
-                            })
-                        except Exception:
-                            pass
-                continue
-
-            handler = _HANDLERS.get(msg_type)
-            if handler is None:
-                await _send_error(
-                    websocket, "invalid_payload", f"Type de message inconnu: {msg_type!r}"
-                )
-                continue
-
+            receiving = asyncio.create_task(receive(websocket))
+            ending = asyncio.create_task(delivery.ended.wait())
+            try:
+                done, _ = await asyncio.wait((receiving, ending), return_when=asyncio.FIRST_COMPLETED)
+                if ending in done:
+                    return
+                message = receiving.result()
+            except engine.GameError:
+                message = None
+            finally:
+                receiving.cancel()
+                ending.cancel()
+                await asyncio.gather(receiving, ending, return_exceptions=True)
+            terminals = []
+            error = None
             async with room.lock:
+                # A superseded socket cannot issue commands or change presence.
+                if room.closed or room.connections.get(pid) is not websocket or pid not in room.proofs:
+                    return
+                if not bucket.consume() or not global_bucket.consume():
+                    room_manager.invalidate_locked(room, websocket, "rate_limited")
+                    return
                 try:
-                    new_state = handler(room.state, payload, role, local_player_id)
+                    room_manager.ensure_live(room)
+                    if message is None:
+                        invalid()
+                    event, payload = validate(message, room)
+                    role = room.roles[pid]
+                    if role == "ecran-principal":
+                        raise engine.GameError("forbidden_role", "Screens cannot issue game commands.")
+                    if event == "room:quit":
+                        engine.quit_to_menu(room.state, role)
+                        terminals = [(s, "room_closed") for s in room_manager.close_room_locked(room)]
+                    elif event == "player:remove":
+                        target = room.state.players[payload["index"]].id
+                        room.state = engine.remove_player(room.state, payload["index"], role)
+                        room.proofs.pop(target, None)
+                        room.roles.pop(target, None)
+                        room.names.pop(target, None)
+                        target_socket = room.connections.pop(target, None)
+                        if target_socket:
+                            room_manager.invalidate_locked(room, target_socket, "player_kicked")
+                            terminals = [(target_socket, "player_kicked")]
+                    elif event == "presenter:transfer":
+                        target = payload["targetPlayerId"]
+                        room.state = engine.transfer_presenter(room.state, target, role)
+                        room.roles[room.presentateur_id] = "joueur"
+                        room.roles[target] = "presentateur"
+                        room.presentateur_id = target
+                    elif event == "player:rename":
+                        room.state = engine.rename_player(room.state, role, pid, payload["name"])
+                        room.names[pid] = payload["name"]
+                    elif event == "player:set_avatar":
+                        room.state = engine.set_player_avatar(room.state, pid, payload["avatar"])
+                    elif event == "theme:add":
+                        room.state = engine.add_theme(room.state, payload["label"], role)
+                    elif event == "theme:remove":
+                        room.state = engine.remove_theme(room.state, payload["index"], role)
+                    elif event == "theme:select":
+                        room.state = engine.select_theme(room.state, payload["index"], role, pid)
+                    elif event in ("answer:continue", "answer:vault"):
+                        handler = engine.continue_tunnel if event == "answer:continue" else engine.vault
+                        room.state = handler(room.state, role, pid)
+                    else:
+                        room.state = _EMPTY[event](room.state, role)
+                    if not room.closed:
+                        room_manager.publish_locked(room)
                 except engine.GameError as exc:
-                    await _send_error(websocket, exc.code, exc.message)
-                    continue
-                room.state = new_state
-                await _broadcast_state(code)
-
-    except WebSocketDisconnect:
-        room_manager.detach_connection(code, local_player_id)
-        await _mark_disconnected(code, local_player_id)
-    except Exception:
-        logger.exception("Erreur inattendue sur la connexion WS de la room %s", code)
-        room_manager.detach_connection(code, local_player_id)
-        await _mark_disconnected(code, local_player_id)
-
-
-async def _mark_disconnected(code: str, local_player_id: str) -> None:
-    """Marque un participant comme absent — s'applique désormais à tous
-    (joueur et présentateur sont tous dans state.players)."""
-    try:
-        room = room_manager.get_room(code)
-    except RoomNotFoundError:
-        return
-    async with room.lock:
-        room.state = engine.set_player_connected(room.state, local_player_id, False)
-    await _broadcast_state(code)
-
-
-__all__ = ["router"]
+                    error = {"type": "error", "payload": {"code": exc.code, "message": exc.message}}
+            if error:
+                await room_manager.send(room, websocket, error)
+            if terminals:
+                await asyncio.gather(*(room_manager.terminal(room, s, reason) for s, reason in terminals))
+            if room.closed:
+                return
+    except OverflowError:
+        await room_manager.close_socket(websocket, 1009)
+    except (WebSocketDisconnect, RuntimeError, TimeoutError, OSError):
+        pass
+    finally:
+        if reserved:
+            room_manager.preauth_connections -= 1
+        if room is not None and pid is not None:
+            cleanup = asyncio.create_task(room_manager.release(room, pid, websocket))
+            await asyncio.shield(cleanup)

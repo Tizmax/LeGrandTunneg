@@ -9,18 +9,39 @@ Couvre les critères "Done when" du Bloc 5 (scope mémoire) :
 - rejet d'un choix joueur envoyé par le joueur concerné tant que l'état est
   encore choice_pending.
 - rejet d'un choice:reveal envoyé par un Joueur.
-- reconnexion (fermeture + réouverture du WS avec le même local_player_id)
+- reconnexion (fermeture + authentification avec la même preuve de session)
   reçoit l'état complet à jour.
 """
 
 from __future__ import annotations
 
+from contextlib import ExitStack, contextmanager
+
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from app.api import rooms, ws
+from app.core.limits import TokenBucket
+from app.core.settings import settings
 from app.main import app
 from app.rooms.manager import room_manager
+
+
+@pytest.fixture
+def client(monkeypatch):
+    # These are game/protocol regressions, not rate-boundary tests. A complete
+    # game legitimately exceeds the default per-socket burst without UI pauses.
+    for scope in ("rest", "ws_upgrade", "ws_command", "ws_global"):
+        for suffix in ("rate_per_second", "rate_burst"):
+            name = f"{scope}_{suffix}"
+            monkeypatch.setenv(name.upper(), "10000")
+            monkeypatch.setattr(settings, name, 10000)
+    monkeypatch.setattr(rooms, "rest_bucket", TokenBucket(10000, 10000))
+    monkeypatch.setattr(ws, "upgrade_bucket", TokenBucket(10000, 10000))
+    monkeypatch.setattr(ws, "global_bucket", TokenBucket(10000, 10000))
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 def _reset_rooms() -> None:
@@ -39,13 +60,50 @@ def _join_room(client: TestClient, code: str, pseudo: str, role: str = "joueur")
     return resp.json()
 
 
+@contextmanager
+def _authenticated_socket(client: TestClient, identity: dict):
+    with client.websocket_connect(
+        f"/ws/{identity['code']}", headers={"Origin": "http://localhost:5173"},
+    ) as ws:
+        ws.send_json({
+            "type": "session:auth",
+            "payload": {
+                "localPlayerId": identity["localPlayerId"],
+                "sessionToken": identity["sessionToken"],
+            },
+        })
+        message = ws.receive_json()
+        assert message["type"] == "room:state_sync"
+        assert message["payload"]["code"] == identity["code"]
+        assert message["payload"]["localPlayerId"] == identity["localPlayerId"]
+        assert message["payload"]["role"] == identity["role"]
+        yield ws, message["payload"]["state"]
+
+
+@contextmanager
+def _authenticated_clients(client: TestClient, *identities: dict):
+    sockets = {}
+    state = None
+    with ExitStack() as stack:
+        # Screens have no player presence. Connect them first so every later
+        # authentication changes presence and has one deterministic broadcast.
+        for identity in sorted(identities, key=lambda p: p["role"] != "ecran-principal"):
+            ws, state = stack.enter_context(_authenticated_socket(client, identity))
+            for pid, observer in sockets.items():
+                message = observer.receive_json()
+                assert message["type"] == "room:state_sync"
+                assert message["payload"]["localPlayerId"] == pid
+                assert message["payload"]["state"] == state
+            sockets[identity["localPlayerId"]] = ws
+        yield sockets, state
+
+
 def _player(state: dict, player_id: str) -> dict:
     return next(p for p in state["players"] if p["id"] == player_id)
 
 
-def test_full_multi_client_flow() -> None:
+def test_full_multi_client_flow(client: TestClient) -> None:
     _reset_rooms()
-    client = TestClient(app)
 
     created = _create_room(client, "Présentateur Paul")
     code = created["code"]
@@ -66,15 +124,10 @@ def test_full_multi_client_flow() -> None:
     assert screen["role"] == "ecran-principal"
     assert screen_id not in {p["id"] for p in screen["state"]["players"]}
 
-    with client.websocket_connect(f"/ws/{code}?local_player_id={presentateur_id}") as ws_pres, \
-         client.websocket_connect(f"/ws/{code}?local_player_id={player1_id}") as ws_p1, \
-         client.websocket_connect(f"/ws/{code}?local_player_id={player2_id}") as ws_p2, \
-         client.websocket_connect(f"/ws/{code}?local_player_id={screen_id}") as ws_screen:
-
-        clients = {
-            presentateur_id: ws_pres, player1_id: ws_p1,
-            player2_id: ws_p2, screen_id: ws_screen,
-        }
+    assert all(not p["connected"] for p in screen["state"]["players"])
+    with _authenticated_clients(client, created, joined1, joined2, screen) as (clients, state):
+        ws_pres = clients[presentateur_id]
+        ws_screen = clients[screen_id]
         roles = {
             presentateur_id: "presentateur", player1_id: "joueur",
             player2_id: "joueur", screen_id: "ecran-principal",
@@ -95,17 +148,22 @@ def test_full_multi_client_flow() -> None:
             assert _player(state, presentateur_id)["points"] == 0
             assert all(not _player(state, pid)["isPresenter"] for pid in (player1_id, player2_id))
             assert screen_id not in {p["id"] for p in state["players"]}
-            if state["phase"] != "lobby":
+            if state["phase"] not in ("lobby", "end"):
                 assert state["players"][state["currentPlayerIndex"]]["id"] in (player1_id, player2_id)
+                assert state["turnStatus"] == "ready"
+            else:
+                assert state["currentPlayerIndex"] is None
+                assert state["rotationAnchorIndex"] is None
+                assert state["turnStatus"] == "idle"
             return state
 
         def action(ws, event: str, payload: dict | None = None) -> dict:
             ws.send_json({"type": event, "payload": payload or {}})
             return sync()
 
-        # Chaque connexion reçoit un state_sync initial avec son propre rôle.
-        state = sync()
+        # Les accusés d'authentification et diffusions de présence sont consommés.
         assert state["phase"] == "lobby"
+        assert all(p["connected"] for p in state["players"])
         assert _player(state, presentateur_id)["name"] == "Présentateur Paul"
         assert len({p["avatar"] for p in state["players"]}) == 3
 
@@ -226,35 +284,33 @@ def test_full_multi_client_flow() -> None:
         ]
 
 
-def test_reconnection_receives_full_state() -> None:
+def test_reconnection_receives_full_state(client: TestClient) -> None:
     _reset_rooms()
-    client = TestClient(app)
     created = _create_room(client, "Présentateur")
     code = created["code"]
     presentateur_id = created["localPlayerId"]
 
-    with client.websocket_connect(f"/ws/{code}?local_player_id={presentateur_id}") as ws:
-        ws.receive_json()  # état initial
+    with _authenticated_socket(client, created) as (ws, initial):
         ws.send_json({"type": "game:start", "payload": {}})
-        # game:start échoue silencieusement si <2 joueurs, mais ici on teste
-        # juste la reconnexion donc on vérifie une erreur attendue (pas 2 joueurs).
+        # Une partie sans deux joueurs et sans thème ne peut pas démarrer.
         err = ws.receive_json()
         assert err["type"] == "error"
+        assert err["payload"]["code"] == "invalid_payload"
 
-    # Reconnexion avec le même local_player_id : nouvel état complet renvoyé.
-    with client.websocket_connect(f"/ws/{code}?local_player_id={presentateur_id}") as ws2:
-        msg = ws2.receive_json()
-        assert msg["type"] == "room:state_sync"
-        assert msg["payload"]["localPlayerId"] == presentateur_id
-        assert msg["payload"]["role"] == "presentateur"
+    resumed = client.post(f"/api/rooms/{code}/join", json={
+        "localPlayerId": presentateur_id, "sessionToken": created["sessionToken"],
+    })
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["localPlayerId"] == presentateur_id
+    assert "sessionToken" not in resumed.json()
+    # REST resume does not rotate the proof; authenticating restores the state.
+    with _authenticated_socket(client, created) as (_, restored):
+        assert restored == initial
 
 
-def test_lobby_avatars_targeted_removal_and_transfer_state() -> None:
-    """Contrat public du lobby, pas validation des permissions après transfert (Bloc 13)."""
-    from contextlib import ExitStack
-
+def test_lobby_avatars_targeted_removal_and_transfer_state(client: TestClient) -> None:
+    """Contrat public du lobby et permissions vivantes après transfert."""
     _reset_rooms()
-    client = TestClient(app)
     host = _create_room(client, "Paul")
     code, host_id = host["code"], host["localPlayerId"]
     alice = _join_room(client, code, "Alice")
@@ -262,14 +318,7 @@ def test_lobby_avatars_targeted_removal_and_transfer_state() -> None:
     screen = _join_room(client, code, "Projection", "ecran-principal")
     alice_id, bob_id, screen_id = (p["localPlayerId"] for p in (alice, bob, screen))
 
-    with ExitStack() as stack:
-        sockets = {
-            pid: stack.enter_context(client.websocket_connect(f"/ws/{code}?local_player_id={pid}"))
-            for pid in (host_id, alice_id, bob_id, screen_id)
-        }
-        states = [ws.receive_json()["payload"]["state"] for ws in sockets.values()]
-        assert all(s == states[0] for s in states)
-        state = states[0]
+    with _authenticated_clients(client, host, alice, bob, screen) as (sockets, state):
         original = {p["id"]: p.copy() for p in state["players"]}
         used = {p["avatar"] for p in state["players"]}
         free = next(a for a in ("alice", "bob", "charlie", "diana") if a not in used)
@@ -301,58 +350,64 @@ def test_lobby_avatars_targeted_removal_and_transfer_state() -> None:
         assert sockets[host_id].receive_json()["payload"]["code"] == "invalid_payload"
         sockets[host_id].send_json({"type": "player:remove", "payload": {"index": bob_index}})
         assert sockets[bob_id].receive_json() == {"type": "player:kicked", "payload": {}}
-        with pytest.raises(WebSocketDisconnect):
+        assert sockets[bob_id].receive_json() == {
+            "type": "session:ended",
+            "payload": {"code": "player_kicked", "message": "You were removed from the room."},
+        }
+        with pytest.raises(WebSocketDisconnect) as kicked:
             sockets[bob_id].receive_json()
+        assert kicked.value.code == 4403
         del sockets[bob_id]
         for ws in sockets.values():
             state = ws.receive_json()["payload"]["state"]
             assert {p["id"] for p in state["players"]} == {host_id, alice_id}
-        # La sortie de la socket retirée peut aussi diffuser la présence inchangée.
-        # Une action barrière permet de vider ces notifications avant le transfert.
         sockets[host_id].send_json({"type": "theme:add", "payload": {"label": "Musique"}})
         for ws in sockets.values():
-            for _ in range(3):
-                state = ws.receive_json()["payload"]["state"]
-                if state["themes"]:
-                    break
-            else:
-                pytest.fail("theme:add broadcast not received")
+            state = ws.receive_json()["payload"]["state"]
             assert state["themes"][0]["label"] == "Musique"
 
         sockets[alice_id].send_json({"type": "presenter:transfer", "payload": {"targetPlayerId": host_id}})
         assert sockets[alice_id].receive_json()["payload"]["code"] == "forbidden_role"
         sockets[host_id].send_json({"type": "presenter:transfer", "payload": {"targetPlayerId": alice_id}})
-        # Le handler actuel envoie deux synchronisations identiques par destinataire.
         for pid, ws in sockets.items():
-            for _ in range(2):
-                msg = ws.receive_json()
-                assert msg["type"] == "room:state_sync"
-                assert msg["payload"]["localPlayerId"] == pid
-                assert msg["payload"]["role"] == {
-                    host_id: "joueur", alice_id: "presentateur", screen_id: "ecran-principal",
-                }[pid]
-                state = msg["payload"]["state"]
-                assert _player(state, alice_id)["isPresenter"] is True
-                assert _player(state, host_id)["isPresenter"] is False
-                assert _player(state, host_id)["avatar"] == free
-                assert all(p["points"] == 0 for p in state["players"])
+            msg = ws.receive_json()
+            assert msg["type"] == "room:state_sync"
+            assert msg["payload"]["localPlayerId"] == pid
+            assert msg["payload"]["role"] == {
+                host_id: "joueur", alice_id: "presentateur", screen_id: "ecran-principal",
+            }[pid]
+            state = msg["payload"]["state"]
+            assert _player(state, alice_id)["isPresenter"] is True
+            assert _player(state, host_id)["isPresenter"] is False
+            assert _player(state, host_id)["avatar"] == free
+            assert all(p["points"] == 0 for p in state["players"])
+
+        sockets[host_id].send_json({"type": "theme:add", "payload": {"label": "Refusé"}})
+        assert sockets[host_id].receive_json()["payload"]["code"] == "forbidden_role"
+        sockets[alice_id].send_json({"type": "theme:add", "payload": {"label": "Cinéma"}})
+        for ws in sockets.values():
+            state = ws.receive_json()["payload"]["state"]
+            assert [theme["label"] for theme in state["themes"]] == ["Musique", "Cinéma"]
+
+        revoked = client.post(f"/api/rooms/{code}/join", json={
+            "localPlayerId": bob_id, "sessionToken": bob["sessionToken"],
+        })
+        assert revoked.status_code == 401
+        assert revoked.json()["detail"]["code"] == "session_revoked"
 
 
-def test_player_and_presentateur_can_rename_themselves_in_lobby() -> None:
+def test_player_and_presentateur_can_rename_themselves_in_lobby(client: TestClient) -> None:
     """Fusion lobby 2026-10-11 : chacun renomme UNIQUEMENT lui-même, possible
     seulement en lobby (voir engine.rename_player + manager.rename_participant)."""
     _reset_rooms()
-    client = TestClient(app)
     created = _create_room(client, "Paul")
     code = created["code"]
     presentateur_id = created["localPlayerId"]
     joined = _join_room(client, code, "Alice")
     player_id = joined["localPlayerId"]
 
-    with client.websocket_connect(f"/ws/{code}?local_player_id={presentateur_id}") as ws_pres, \
-         client.websocket_connect(f"/ws/{code}?local_player_id={player_id}") as ws_p1:
-        ws_pres.receive_json()
-        ws_p1.receive_json()
+    with _authenticated_clients(client, created, joined) as (sockets, _):
+        ws_pres, ws_p1 = sockets[presentateur_id], sockets[player_id]
 
         # Le Présentateur renomme lui-même.
         ws_pres.send_json({"type": "player:rename", "payload": {"name": "Paulo"}})
@@ -375,27 +430,27 @@ def test_player_and_presentateur_can_rename_themselves_in_lobby() -> None:
         assert err["payload"]["code"] == "invalid_payload"
 
 
-def test_player_disconnect_marks_absent_and_reconnect_restores_presence() -> None:
+def test_player_disconnect_marks_absent_and_reconnect_restores_presence(client: TestClient) -> None:
     """Un Joueur qui ferme sa connexion WS reste dans state.players (pour le
     classement final) mais est marqué connected=False (voir
     engine.set_player_connected) — les autres clients déjà connectés doivent
     recevoir le broadcast sans attendre une action quelconque. À la
-    reconnexion avec le même local_player_id, il redevient connected=True."""
+    reconnexion avec la même preuve, il redevient connected=True."""
     _reset_rooms()
-    client = TestClient(app)
     created = _create_room(client, "Paul")
     code = created["code"]
     presentateur_id = created["localPlayerId"]
     joined = _join_room(client, code, "Alice")
     player_id = joined["localPlayerId"]
 
-    with client.websocket_connect(f"/ws/{code}?local_player_id={presentateur_id}") as ws_pres:
-        ws_pres.receive_json()
+    assert _player(joined["state"], player_id)["connected"] is False
+    with _authenticated_socket(client, created) as (ws_pres, _):
 
-        with client.websocket_connect(f"/ws/{code}?local_player_id={player_id}") as ws_p1:
-            ws_p1.receive_json()
-            # Alice se (re)connecte : connected=True était déjà la valeur par
-            # défaut, donc PAS de broadcast parasite ici (voir app/api/ws.py).
+        with _authenticated_socket(client, joined) as (_, connected):
+            assert _player(connected, player_id)["connected"] is True
+            presence = ws_pres.receive_json()
+            assert presence["type"] == "room:state_sync"
+            assert presence["payload"]["state"] == connected
 
         # La fermeture du `with` ci-dessus clôt la connexion WS d'Alice.
         # Le Présentateur, resté connecté, doit recevoir le state_sync
@@ -405,10 +460,9 @@ def test_player_disconnect_marks_absent_and_reconnect_restores_presence() -> Non
         alice = next(p for p in msg["payload"]["state"]["players"] if p["id"] == player_id)
         assert alice["connected"] is False
 
-        # Alice se reconnecte avec le même local_player_id.
-        with client.websocket_connect(f"/ws/{code}?local_player_id={player_id}") as ws_p1_again:
-            init = ws_p1_again.receive_json()
-            assert _player(init["payload"]["state"], player_id)["connected"] is True
+        # Alice se reconnecte avec la même preuve de session.
+        with _authenticated_socket(client, joined) as (_, restored):
+            assert _player(restored, player_id)["connected"] is True
             # Le Présentateur reçoit aussi le broadcast confirmant le retour.
             msg2 = ws_pres.receive_json()
             alice_again = next(
@@ -417,13 +471,12 @@ def test_player_disconnect_marks_absent_and_reconnect_restores_presence() -> Non
             assert alice_again["connected"] is True
 
 
-def test_game_end_early_returns_everyone_to_lobby() -> None:
+def test_game_end_early_returns_everyone_to_lobby(client: TestClient) -> None:
     """Le Présentateur peut terminer la partie en cours à tout moment —
     différent de room:quit qui ferme toute la room : ici joueurs et thèmes
     sont conservés, scores remis à zéro, phase='lobby' (voir
     engine.end_game_early)."""
     _reset_rooms()
-    client = TestClient(app)
     created = _create_room(client, "Paul")
     code = created["code"]
     presentateur_id = created["localPlayerId"]
@@ -432,11 +485,8 @@ def test_game_end_early_returns_everyone_to_lobby() -> None:
     player1_id = joined1["localPlayerId"]
     player2_id = joined2["localPlayerId"]
 
-    with client.websocket_connect(f"/ws/{code}?local_player_id={presentateur_id}") as ws_pres, \
-         client.websocket_connect(f"/ws/{code}?local_player_id={player1_id}") as ws_p1, \
-         client.websocket_connect(f"/ws/{code}?local_player_id={player2_id}") as ws_p2:
-        for ws in (ws_pres, ws_p1, ws_p2):
-            ws.receive_json()
+    with _authenticated_clients(client, created, joined1, joined2) as (sockets, _):
+        ws_pres, ws_p1, ws_p2 = (sockets[pid] for pid in (presentateur_id, player1_id, player2_id))
 
         ws_pres.send_json({"type": "theme:add", "payload": {"label": "Cinéma"}})
         for ws in (ws_pres, ws_p1, ws_p2):
@@ -461,12 +511,27 @@ def test_game_end_early_returns_everyone_to_lobby() -> None:
             assert {p["id"] for p in state["players"]} == {presentateur_id, player1_id, player2_id}
             assert len(state["themes"]) == 1
             assert all(p["points"] == 0 for p in state["players"])
+            assert state["turnStatus"] == "idle"
+            assert state["currentPlayerIndex"] is None
+            assert state["rotationAnchorIndex"] is None
 
 
-def test_unknown_room_rejects_websocket_upgrade() -> None:
+def test_unknown_room_authentication_ends_session(client: TestClient) -> None:
     _reset_rooms()
-    client = TestClient(app)
-    with pytest.raises(WebSocketDisconnect) as exc_info:
-        with client.websocket_connect("/ws/ZZZZ?local_player_id=whatever"):
-            pass
-    assert exc_info.value.code == 1008
+    identity = _create_room(client, "Paul")
+    missing_code = "ZZZZ" if identity["code"] != "ZZZZ" else "YYYY"
+    with client.websocket_connect(
+        f"/ws/{missing_code}", headers={"Origin": "http://localhost:5173"},
+    ) as ws:
+        ws.send_json({"type": "session:auth", "payload": {
+            "localPlayerId": identity["localPlayerId"],
+            "sessionToken": identity["sessionToken"],
+        }})
+        assert ws.receive_json() == {"type": "room:closed", "payload": {}}
+        assert ws.receive_json() == {
+            "type": "session:ended",
+            "payload": {"code": "room_closed", "message": "Room closed or unavailable."},
+        }
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            ws.receive_json()
+        assert exc_info.value.code == 4404

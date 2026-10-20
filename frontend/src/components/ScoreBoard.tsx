@@ -2,7 +2,7 @@ import type { Player } from '../game/types'
 
 type ScoreBoardProps = {
   players: Player[]
-  currentPlayerIndex: number
+  currentPlayerIndex: number | null
 }
 
 /**
@@ -32,7 +32,7 @@ export function ScoreBoard({ players, currentPlayerIndex }: ScoreBoardProps) {
   const half = Math.ceil(otherCount / 2)
   const before: number[] = []
   const after: number[] = []
-  for (let step = 1; step <= half; step++) {
+  for (let step = 1; currentPlayerIndex !== null && step <= half; step++) {
     before.push((currentPlayerIndex - step + count) % count)
     after.push((currentPlayerIndex + step) % count)
   }
@@ -73,6 +73,14 @@ export function ScoreBoard({ players, currentPlayerIndex }: ScoreBoardProps) {
         <div className="text-xs tracking-wide text-[#9a8d7d] tabular-nums">
           {player.points} pts
         </div>
+      </div>
+    )
+  }
+
+  if (currentPlayerIndex === null) {
+    return (
+      <div className="flex w-full flex-wrap items-center justify-center gap-5">
+        {players.map((_, i) => renderCard(i, 'muted', 'waiting'))}
       </div>
     )
   }

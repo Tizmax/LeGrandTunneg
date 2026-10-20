@@ -4,303 +4,208 @@ created: 2026-10-11
 updated: 2026-10-20
 ---
 
-# Protocole WebSocket — mode room multi
+# Protocole Multi Bloc 13
 
-Contrat observé sur `d0d97ef2177467a0189d86fd8c3a090a0f8cae4e`, réaligné au
-premier jalon le 2026-10-20. Voir [le compte-rendu de validation](validation-jalon-1.md).
-Ce document décrit le comportement actuel, pas une garantie de sécurité des
-sessions ni de reprise après redémarrage (Blocs 13/14).
+Contrat incompatible avec le premier jalon `c3fdbf6`. La spec de référence est
+[`bloc-13-multi-consolidation-contract`](specs/bloc-13-multi-consolidation-contract.md).
+Les preuves d'exécution et limites sont dans [la validation Bloc 13](validation-bloc-13.md).
+Un seul process possède les rooms en mémoire : aucun compte, aucune sauvegarde,
+aucune reprise après redémarrage. Déployer pendant une fenêtre sans partie et
+recharger les clients. Plusieurs workers/réplicas ne sont pas supportés.
 
-**Mise à jour 2026-10-11 (chrono)** : ajout du sous-état `question-pending`
-entre la sélection du thème (ou "Continuer") et le lancement effectif du
-chrono. Le Présentateur pose désormais sa question à l'oral avant de
-déclencher manuellement le minuteur via `timer:start` — voir table des
-messages et la spécification figée dans l'exec-plan pour le détail des deux
-temps côté joueur ("écoute la question" puis "attend le verdict").
+## Identité Et REST
 
-**Mise à jour 2026-10-11 (lobby unique)** : fusion des anciennes phases
-`menu` (attente joueurs) et `themes` (saisie des thèmes) en une seule phase
-`lobby` — un seul écran affiche simultanément la liste des joueurs, la
-saisie des thèmes par le Présentateur, et permet à chaque entrée de `players`
-(Présentateur, Joueur) de renommer UNIQUEMENT elle-même via
-`player:rename`. Le message `lobby:go_to_themes` est supprimé ; `game:start`
-vérifie désormais les deux préconditions (au moins deux joueurs hors
-Présentateur ET `themes.length >= 1`) en une seule fois. Depuis l'unification
-des participants, le Présentateur est dans `players` avec `isPresenter: true`,
-son nom et son avatar. Les anciens champs `presentateurName` et
-`presentateurAvatar` ne sont plus émis.
+`localPlayerId` est un UUID public canonique, jamais une autorisation. Chaque
+adhésion reçoit un secret indépendant de 32 octets aléatoires, base64url sans
+padding (43 caractères). Seul son SHA-256 reste au serveur; comparaison en temps
+constant. Ne jamais journaliser corps REST, trames d'authentification ou secrets.
 
-**Mise à jour 2026-10-11 (présence/absence + fin anticipée)** : un Joueur
-peut désormais fermer sa connexion WebSocket sans quitter définitivement la
-partie — il reste dans `players` (classement final préservé) mais passe à
-`connected: false` ; son tour est automatiquement sauté par la rotation
-(`currentPlayerIndex` avance au prochain joueur `connected: true`), sans
-jamais modifier l'ordre de jeu lui-même. À la reconnexion avec le même
-`localPlayerId`, il redevient `connected: true` et peut reprendre son tour
-s'il retombe dessus (pas de rattrapage automatique des tours manqués). Par
-ailleurs, le Présentateur dispose d'une action séparée `game:end_early`,
-visible sur tous les écrans de jeu, qui ramène **tout le monde** au lobby en
-conservant joueurs et thèmes (scores remis à zéro) — à ne pas confondre avec
-`room:quit` qui ferme intégralement la room.
+| Requête | Corps exact | Réponse |
+|---|---|---|
+| `POST /api/rooms` | `{pseudo}` | `{code, localPlayerId, role: "presentateur", sessionToken}` |
+| `POST /api/rooms/{code}/join` nouvelle adhésion | `{pseudo, role?}` | `{code, localPlayerId, role, sessionToken, state}` |
+| Même endpoint, reprise | `{localPlayerId, sessionToken}` | `{code, localPlayerId, role, state}` |
 
-Portée de cette version : **état de room et de partie entièrement en mémoire
-process-local** (pas de Postgres branché). La persistance (Bloc 2) et la
-reprise après redémarrage du serveur viendront dans une passe ultérieure — ce
-document sera mis à jour à ce moment-là pour la stratégie de reconnexion
-post-crash serveur. Ici, « reconnexion » signifie uniquement : un client qui
-perd puis rouvre sa connexion WebSocket pendant que le process serveur tourne
-toujours.
+Rôles de jointure : `joueur` par défaut, ou `ecran-principal`. Joueurs uniquement
+en lobby; écrans à tout moment. La reprise ne crée rien, ne renouvelle pas le
+secret, ne change pas la présence et ne diffuse rien. Une preuve incorrecte ne
+devient jamais une nouvelle adhésion. Codes de room normalisés en majuscules.
+REST laisse `connected: false` jusqu'à l'authentification WS. Les réponses
+create/join, erreurs comprises, portent `Cache-Control: no-store`.
 
-## Vue d'ensemble du flux
+Corps JSON strict : champs exacts, aucun coercing, noms trimés avant contrôle,
+limite brute 8192 octets par défaut avant décodage. Erreurs HTTP :
+`{detail: {code, message}}`. Codes : 422 `invalid_payload`, 401 `session_revoked`
+(`Session unavailable.`), 404 `room_not_found`, 409 `invalid_phase` ou
+`capacity_exceeded`, 429 `rate_limited` avec `Retry-After`, 413
+`payload_too_large`, 503 `capacity_exceeded` pour épuisement des rooms ou des
+lecteurs de corps, 408 `request_timeout` pour expiration de lecture du corps.
 
-1. **Créer une room** : `POST /api/rooms` `{pseudo}` → le créateur devient
-   **Présentateur**. Réponse : `{code, localPlayerId, role: "presentateur"}`.
-2. **Rejoindre une room** : `POST /api/rooms/{code}/join` `{pseudo, role?}`
-   (`role` ∈ `"joueur"` (défaut) | `"ecran-principal"`). Réponse :
-   `{code, localPlayerId, role, state}`. Le créateur Présentateur est déjà
-   présent dans `state.players`, contrairement à l'Écran principal.
-   - Rejoindre en tant que `joueur` n'est accepté que tant que la partie est
-     en lobby (`phase === "lobby"`) : ajoute immédiatement une entrée dans
-     `players` via le moteur de règles.
-   - Rejoindre en tant que `ecran-principal` est accepté à tout moment ; ce
-     rôle n'est jamais ajouté à `players` (lecture seule, aucune action de
-     jeu possible).
-   - Si `localPlayerId` est fourni dans le corps de la requête et correspond
-     à un participant déjà connu de cette room, c'est une **reconnexion** :
-     aucun nouveau joueur n'est créé, le rôle existant est simplement
-     retourné.
-3. **Ouvrir le WebSocket** : `GET /ws/{code}?local_player_id=...` (upgrade).
-   Le serveur vérifie que `local_player_id` est bien connu de la room (via
-   l'étape REST précédente), attache la connexion, puis envoie immédiatement
-   un message `room:state_sync` complet.
-4. **Échanges en cours de partie** : chaque action de jeu est un message
-   client→serveur avec contrôles serveur de rôle (voir table et limites du transfert).
-   Après chaque action acceptée, le serveur **rediffuse l'état complet** de
-   la room à toutes les connexions actives (`room:state_sync` broadcast) —
-   pas de diffs incrémentaux dans cette version.
-5. **Fin de room** : `room:quit` (Présentateur uniquement) vide l'état de la
-   room en mémoire, diffuse `room:closed` à tous les clients connectés, puis
-   ferme toutes les connexions WebSocket et supprime la room du
-   `RoomManager`.
+Create, join et reprise partagent une capacité process-wide de lectures de corps
+en cours : `MAX_REST_BODY_READERS=32`, entier strict positif. Admission immédiate
+sans attente ni queue après le quota de débit REST ; saturation : HTTP 503,
+`{detail:{code:"capacity_exceeded",message:"Body reader capacity exceeded."}}`.
+`REST_BODY_TIMEOUT_SECONDS=5`, nombre positif fini, borne la lecture complète
+par une deadline absolue monotone à partir de l'admission, non renouvelée à
+chaque chunk. Expiration : HTTP 408,
+`{detail:{code:"request_timeout",message:"Request body timed out."}}`.
+Ces erreurs portent `Cache-Control: no-store`. La place est libérée en `finally`
+après succès, timeout, annulation, corps trop grand, JSON invalide, déconnexion
+ou erreur de lecture. La limite brute reste appliquée avant décodage. Aucun
+timeout de proxy n'est présumé.
 
-## Identité et rôles
+## Authentification WS
 
-- `localPlayerId` : UUID généré par le serveur à la création/jointure,
-  renvoyé au client qui doit le conserver (`localStorage`) pour se
-  reconnecter. Un seul `localPlayerId` par onglet/participant.
-- Rôles possibles : `presentateur` (exactement un par room, initialement le
-  créateur, transférable en lobby via `presenter:transfer` ; entrée dans
-  `players` avec `isPresenter: true`), `joueur` (entrée dans `players` avec
-  `isPresenter: false`), `ecran-principal`
-  (lecture seule, jamais dans `players`).
-- `currentPlayerIndex` indexe le tableau **complet** `players`, pas une liste
-  filtrée. Identifier les participants par `id`, y compris après transfert ou
-  retrait. Le Présentateur n'est éligible ni au tour ni aux points/classement.
-  La rotation normale et `game:start` l'excluent ; les limites de `game:reset`
-  et des joueurs absents sont décrites plus bas, pas garanties par ce jalon.
-- Le serveur associe en interne chaque entrée `players[i]` à son
-  `localPlayerId` d'origine (champ `id` dans le DTO `Player`, voir plus bas)
-  — c'est ce qui permet au serveur de savoir si un message `theme:select`
-  émis par tel `localPlayerId` correspond bien au joueur dont c'est le tour
-  (`players[currentPlayerIndex].id === localPlayerId` de la connexion).
+Ouvrir `/ws/{code}` sans query d'identité/secret. L'ancien
+`?local_player_id=...` est rejeté. Le navigateur doit envoyer exactement une
+origine de l'allowlist, même en same-host : absence, `null`, doublons, wildcard
+et correspondances de suffixe refusés avant upgrade (HTTP 403). Capacité ou
+débit d'upgrade épuisés : HTTP 429. Origin complète la preuve, sans la remplacer.
 
-## Enveloppe des messages
+Le premier message texte, dans les 5 secondes après acceptation, est exactement :
 
-```jsonc
-// client → serveur
-{ "type": "theme:select", "payload": { "index": 2 } }
-
-// serveur → client (état)
-{ "type": "room:state_sync", "payload": { "code": "ABCD", "role": "joueur", "localPlayerId": "...", "state": { /* GameStateDTO */ } } }
-
-// serveur → client (erreur, jamais broadcastée, uniquement au client fautif)
-{ "type": "error", "payload": { "code": "forbidden_role", "message": "..." } }
+```json
+{"type":"session:auth","payload":{"localPlayerId":"UUID canonique","sessionToken":"secret base64url de 43 caractères"}}
 ```
 
-## DTO `GameState` (JSON, camelCase — miroir direct de `frontend/src/game/types.ts`)
+Aucun état ni changement de présence ne précède la vérification. Le premier
+`room:state_sync` est l'acquittement. Un deuxième `session:auth` est invalide.
+La dernière socket authentifiée gagne, sans passage absent intermédiaire.
+L'ancienne perd son autorité avant notification. Ses commandes, déconnexions et
+échecs d'envoi tardifs ne peuvent détacher la nouvelle.
+
+```json
+{"type":"room:state_sync","payload":{"code":"ABCD","role":"joueur","localPlayerId":"UUID public","state":{}}}
+```
+
+Les rôles et identifiants de chaque enveloppe sont spécifiques au destinataire;
+`state` est public et ne contient aucun secret. Les snapshots complets sont
+ordonnés par socket, à livraison bornée, hors verrou de mutation. Des états égaux
+répétés sont acceptables. Chaque commande revérifie sous verrou la room vivante,
+la session, l'objet socket exact et le rôle actuel. Le transfert de Présentateur
+agit immédiatement sur les sockets déjà ouvertes et ne change aucun secret.
+
+## Commandes
+
+L'enveloppe doit avoir exactement `type` (chaîne connue) et `payload` (objet).
+Null, tableau, primitive, JSON invalide, clés supplémentaires, coercions et
+types inconnus donnent une erreur ciblée sans fermer la socket dans les bornes
+de ressources :
+
+```json
+{"type":"error","payload":{"code":"invalid_payload","message":"Invalid message."}}
+```
+
+Les binaires sont invalides, soumis à la même limite de taille. Les rejets ne
+mutent ni ne diffusent. Autres erreurs : `forbidden_role`, `not_your_turn`,
+`invalid_phase`, `game_suspended`, `capacity_exceeded`, `rate_limited`.
+
+| Commande | Payload exact | Autorité et précondition |
+|---|---|---|
+| `theme:add` | `{label}` | Présentateur, lobby, label non vide après trim |
+| `theme:remove` | `{index}` | Présentateur, lobby |
+| `player:remove` | `{index}` | Présentateur, lobby, cible non présentateur |
+| `player:rename` | `{name}` | Participant, soi-même, lobby |
+| `player:set_avatar` | `{avatar}` | Participant, soi-même, lobby, avatar connu/libre |
+| `presenter:transfer` | `{targetPlayerId}` | Présentateur, lobby, UUID canonique d'un joueur |
+| `game:start` | `{}` | Présentateur, lobby, 2 joueurs inscrits, 1 thème, 1 joueur connecté |
+| `choice:reveal` | `{}` | Présentateur, sélection ou succès en attente de révélation |
+| `theme:select` | `{index}` | Joueur actif, sélection révélée, thème non terminé |
+| `timer:start` | `{}` | Présentateur, `question-pending` |
+| `answer:good`, `answer:bad`, `answer:pass` | `{}` | Présentateur, `question` |
+| `answer:continue`, `answer:vault` | `{}` | Joueur actif, `after-success-open` |
+| `game:reset` | `{}` | Présentateur, post-lobby, thème et joueur connecté requis |
+| `game:end_early` | `{}` | Présentateur, retour lobby, participants/thèmes conservés |
+| `room:quit` | `{}` | Présentateur, révocation et fermeture de la room |
+
+`index` est un entier non négatif en bornes, ni booléen ni flottant. Un écran
+n'est jamais dans `players` et ne peut ni jouer ni modifier nom/avatar. Avatars :
+`alice,bob,charlie,diana,edgar,flora,gareth,hannah,ivan,julia,kevin,luna,marco,nina,oscar,petra`.
+Le retrait révoque la preuve avant toute notification/fermeture, sans tombstone
+illimité. Les secrets ne sont jamais réintroduits dans une synchronisation.
+
+## DTO Et Tours
 
 ```ts
-type Theme = {
-  label: string
-  progressValue: number      // 0-10
-  validatedSquares: number   // 0-10
-  discovered: boolean
-  completed: boolean
-  nullified: number[]
-}
-
-type Player = {
-  id: string        // localPlayerId d'origine
-  name: string
-  points: number
-  // false si la connexion WS de ce joueur est actuellement fermée (il reste
-  // dans le classement, mais son tour est sauté) — ajouté 2026-10-11.
-  connected: boolean
-  avatar: string    // ID SVG, assigné automatiquement à la création/jointure
-  isPresenter: boolean
-}
-
-type GamePhase =
-  | 'lobby' | 'selection-pending' | 'selection' | 'tunnel' | 'end'
-
-type TunnelSubPhase =
-  | 'question-pending' | 'question' | 'after-success-pending' | 'after-success-open' | null
-
-type HistoryEntry = { themeLabel: string; playerName: string; pointsGained: number }
-
 type GameState = {
-  phase: GamePhase
-  players: Player[]
-  themes: Theme[]
-  currentPlayerIndex: number
+  phase: 'lobby' | 'selection-pending' | 'selection' | 'tunnel' | 'end'
+  players: {id: string; name: string; points: number; connected: boolean;
+    avatar: string; isPresenter: boolean}[]
+  themes: {label: string; progressValue: number; validatedSquares: number;
+    discovered: boolean; completed: boolean; nullified: number[]}[]
+  currentPlayerIndex: number | null
+  turnStatus: 'idle' | 'ready' | 'active-absent' | 'waiting-eligible'
+  rotationAnchorIndex: number | null
   activeThemeIndex: number | null
-  tunnelSubPhase: TunnelSubPhase
-  history: HistoryEntry[]
+  tunnelSubPhase: 'question-pending' | 'question' | 'after-success-pending'
+    | 'after-success-open' | null
+  history: {themeLabel: string; playerName: string; pointsGained: number}[]
 }
 ```
 
-## Table des messages client → serveur
+Les indexes portent sur le tableau complet. Lobby/end : `idle`, les deux indexes
+nuls. `ready` : acteur connecté non présentateur, ancre nulle. Perte de l'acteur :
+`active-absent`, même index, phase, sous-phase, progression et historique. Son
+retour authentifié restaure ce tour; un autre retour ne le prend pas. Un tour
+terminé tourne cycliquement parmi les joueurs connectés, y compris soi après un
+cycle complet. Sans éligible : `selection-pending`, `waiting-eligible`, acteur
+nul, ancre sur l'acteur sortant. Le prochain retour choisit après l'ancre.
 
-| Type              | Payload                | Rôle autorisé                                  | Précondition d'état serveur                                             | Action moteur équivalente (gameReducer.ts) |
-|-------------------|-------------------------|-------------------------------------------------|---------------------------------------------------------------------------|----------------------------------------------|
-| `theme:add`       | `{ label }`             | Présentateur                                    | `phase === 'lobby'`                                                       | `ADD_THEME`                                  |
-| `theme:remove`    | `{ index }`             | Présentateur                                    | `phase === 'lobby'`                                                       | `REMOVE_THEME`                               |
-| `player:remove`   | `{ index }`             | Présentateur                                    | `phase === 'lobby'`, index du tableau complet, cible non Présentateur       | `REMOVE_PLAYER`                              |
-| `player:rename`   | `{ name }`              | Joueur ou Présentateur, sur lui-même uniquement | `phase === 'lobby'`, nom non vide après trim                               | `RENAME_SELF`                                |
-| `player:set_avatar` | `{ avatar }`          | Participant de `players`, sur lui-même           | `phase === 'lobby'`, avatar autorisé, libre ou déjà à soi                    | `SET_SELF_AVATAR`                            |
-| `presenter:transfer` | `{ targetPlayerId }` | Présentateur                                    | `phase === 'lobby'`, cible existante dans `players`, non Présentateur         | `TRANSFER_PRESENTER`                         |
-| `game:start`      | `{}`                    | Présentateur                                    | `phase === 'lobby'`, au moins 2 joueurs hors Présentateur, au moins 1 thème    | `START_GAME`                                 |
-| `choice:reveal`   | `{}`                    | Présentateur                                    | `phase === 'selection-pending'` OU `tunnelSubPhase === 'after-success-pending'` | `REVEAL_CHOICE`                         |
-| `theme:select`    | `{ index }`             | **Joueur concerné** (`players[currentPlayerIndex].id`) | `phase === 'selection'` (choice_open), thème visé non `completed`    | `SELECT_THEME`                               |
-| `timer:start`     | `{}`                    | Présentateur                                    | `phase === 'tunnel'`, `tunnelSubPhase === 'question-pending'`              | *(nouveau — pas d'équivalent POC)*           |
-| `answer:good`     | `{}`                    | Présentateur                                    | `phase === 'tunnel'`, `tunnelSubPhase === 'question'`                      | `GOOD_ANSWER`                                |
-| `answer:bad`      | `{}`                    | Présentateur                                    | `phase === 'tunnel'`, `tunnelSubPhase === 'question'`                      | `BAD_ANSWER`                                 |
-| `answer:pass`     | `{}`                    | Présentateur                                    | `phase === 'tunnel'`, `tunnelSubPhase === 'question'`                      | `PASS`                                       |
-| `answer:continue` | `{}`                    | **Joueur concerné**                              | `tunnelSubPhase === 'after-success-open'`                                  | `CONTINUE`                                   |
-| `answer:vault`    | `{}`                    | **Joueur concerné**                              | `tunnelSubPhase === 'after-success-open'`                                  | `COFFRER`                                    |
-| `game:reset`      | `{}`                    | Présentateur                                    | aucune (toute phase post-lobby)                                           | `RESET_GAME`                                 |
-| `game:end_early`  | `{}`                    | Présentateur                                    | aucune (visible sur tous les écrans de jeu)                               | `END_GAME_EARLY`                             |
-| `room:quit`       | `{}`                    | Présentateur                                    | aucune                                                                     | `QUIT_TO_MENU` + fermeture de la room          |
+Pendant suspension, révélation, sélection, chrono et toutes les réponses sont
+rejetés `game_suspended`. Le Présentateur peut reset si éligible, terminer vers
+lobby ou fermer. Reset prend le premier joueur connecté en ordre de tableau,
+jamais arbitrairement l'index zéro. Fin de tous les thèmes : end/idle/indexes nuls.
+`answer:pass` conserve l'acteur, y compris au coffrage automatique. Coffrer avant
+10 ne termine pas le thème. Le Présentateur n'a ni tour ni points ni classement.
 
-« Joueur concerné » = le `localPlayerId` de la connexion émettrice doit être
-strictement égal à `players[currentPlayerIndex].id` au moment du message. Toute
-autre connexion de rôle `joueur` tentant la même action reçoit `error` avec
-`code: "not_your_turn"`.
+Le chrono est un affichage **local indicatif de 60 secondes**, seulement en
+`question`, clé thème/progression/sous-phase. Une présence sync/suspension ne le
+remonte, ne le gèle et ne le redémarre pas. Remontage/reload/reconnexion en
+question repart à 60. Zéro n'envoie aucune commande : jugement toujours humain.
 
-Les actions de jeu envoyées par un rôle non autorisé reçoivent `error` avec
-`code: "forbidden_role"`. Toute action envoyée alors que la précondition
-d'état n'est pas remplie reçoit `error` avec `code: "invalid_phase"`
-(ex. `theme:select` reçu alors que `phase === 'selection-pending'` — le choix
-n'est pas encore révélé). Dans tous les cas d'erreur, l'état de la room n'est
-pas modifié et **aucun broadcast n'est émis** — seul le client fautif reçoit
-le message `error`.
+## Fermetures Et Reprise
 
-Note sur `player:add` : volontairement absent de cette table. En mode multi,
-un joueur rejoint la room avec son propre pseudo via `POST
-/api/rooms/{code}/join` (étape REST, pas un message WS) — il n'y a pas de
-action WS équivalente à l'ancien `ADD_PLAYER` du POC hotseat.
+Terminal : `{"type":"session:ended","payload":{"code":"…","message":"…"}}`,
+puis fermeture; notification best effort, code de fermeture faisant autorité.
 
-Avatars autorisés : `alice`, `bob`, `charlie`, `diana`, `edgar`, `flora`,
-`gareth`, `hannah`, `ivan`, `julia`, `kevin`, `luna`, `marco`, `nina`, `oscar`,
-`petra`. Ils correspondent aux SVG de `frontend/public/avatars`. Un avatar
-libre est attribué aléatoirement ; la limite est de 16 participants dans
-`players` (Présentateur inclus, Écran principal exclu). Avatar inconnu ou
-déjà pris : `invalid_payload`. Les actions d'identité ne changent pas les
-autres participants. Un Écran principal n'a pas d'identité dans `players` :
-son renommage est actuellement refusé (`invalid_payload`), et un changement
-d'avatar n'a pas d'effet, sans garantie de rejet explicite (Bloc 13).
+| Code | Fermeture | Message exact |
+|---|---|---|
+| `session_revoked` | 4401 | `Session unavailable.` |
+| `player_kicked` | 4403 | `You were removed from the room.` |
+| `room_closed` | 4404 | `Room closed or unavailable.` |
+| `session_replaced` | 4409 | `Session opened elsewhere.` |
 
-Le retrait accepté émet `player:kicked` uniquement vers la cible connectée,
-ferme sa socket puis diffuse l'état sans cette entrée. Le retrait du
-Présentateur est refusé (`invalid_payload`). Cela **ne révoque pas encore**
-l'identité stockée dans `room.roles` : ne pas assimiler retrait visuel et
-révocation d'accès (Bloc 13).
+Les alias `player:kicked` et `room:closed`, payload `{}`, précèdent le terminal
+si livrables. Première trame invalide : 1008; délai auth : 4408; débit : erreur
+ciblée puis 4429; taille : 1009. Les tailles sont aussi bornées au transport
+Uvicorn, avant JSON. Les autres erreurs de commandes laissent la socket utilisable.
 
-Le transfert met à jour `isPresenter`, `room.roles`, `room.presentateur_id`
-et le `role` envoyé à chaque destinataire ; noms, avatars et identifiants
-restent inchangés. Le handler actuel envoie deux `room:state_sync` identiques
-par connexion. **Les permissions sur les sockets déjà ouvertes restent
-capturées avant transfert** : l'affichage du nouveau rôle ne prouve donc pas
-son enforcement. Correction et validation des permissions différées au Bloc 13.
+Le client stocke à `legrandtunneg:identity:v2` exactement
+`{version:2, code, localPlayerId, sessionToken, autoResume}`, jamais de rôle de
+confiance. C'est un compromis localStorage : un XSS same-origin vole ce bearer.
+L'ancienne clé `legrandtunneg:identity` demande explicitement une nouvelle
+jointure; elle n'authentifie/crée jamais silencieusement.
 
-Note sur `game:end_early` vs `game:reset` vs `room:quit` : les trois
-réinitialisent scores/progression, mais diffèrent sur la phase cible et la
-portée — `game:reset` relance directement une sélection (`phase:
-'selection-pending'`), `game:end_early` ramène au lobby (`phase: 'lobby'`,
-pour ajuster joueurs/thèmes avant de relancer) sans fermer la room ni
-déconnecter personne, et `room:quit` ferme intégralement la room (toutes les
-connexions sont closes, l'état est supprimé du `RoomManager`).
+Perte transitoire : identité conservée, une seule retry, jitter uniforme entre
+0.5 et 1 fois `min(30000, 500 * 2^n)` ms, n initial 0, remis à zéro seulement
+après sync réussie. Aucun replay ni queue de commandes. Envoi désactivé avant
+auth, callbacks obsolètes ignorés, retries annulées au démontage/changement
+d'identité/déconnexion volontaire. Déconnexion volontaire et remplacement :
+preuve conservée, `autoResume:false` persisté, bouton Reprendre explicite, même
+après reload. Révoqué/retiré/room fermée effacent la preuve utilisable; tous les
+terminaux gardent l'explication visible. 1008/1009/4429 demandent une action
+explicite, 4408 et pannes réseau sont transitoires. Room perdue après restart :
+reprise terminée, pas une sauvegarde durable.
 
-## Messages serveur → client
+## Ressources
 
-| Type              | Quand                                                          | Payload                                                  |
-|-------------------|------------------------------------------------------------------|-----------------------------------------------------------|
-| `room:state_sync` | À chaque connexion WS ouverte, et après chaque action acceptée (broadcast à toute la room) | `{ code, role, localPlayerId, state: GameState }` — `role`/`localPlayerId` sont spécifiques au destinataire, `state` est identique pour tous |
-| `room:closed`     | Après un `room:quit` accepté, avant fermeture des connexions      | `{}`                                                       |
-| `player:kicked`   | Retrait accepté, uniquement vers le participant retiré avant fermeture de sa socket | `{}` |
-| `error`           | Après une action rejetée (rôle ou phase invalide), envoyé **uniquement au client fautif** | `{ code: "forbidden_role" \| "not_your_turn" \| "invalid_phase" \| "invalid_payload" \| "room_not_found", message: string }` |
-
-## Reconnexion (process serveur toujours vivant)
-
-1. Le client garde en mémoire locale (`localStorage`) : `code`, `localPlayerId`.
-2. À la perte de connexion WS (ex. veille, rechargement de page), le client
-   rouvre `GET /ws/{code}?local_player_id=...` avec le même `localPlayerId`.
-3. Le serveur retrouve l'entrée existante dans `room.roles[localPlayerId]`
-   (la room et l'état de jeu étant restés en mémoire, rien n'a été perdu côté
-   serveur), ré-attache la connexion, et renvoie immédiatement
-   `room:state_sync` avec l'état courant complet — y compris un
-   `choice_pending` en cours le cas échéant (le client affiche directement
-   l'écran d'attente neutre adéquat, sans action supplémentaire).
-4. Si `code` est inconnu du `RoomManager` (room jamais créée, ou déjà
-   `room:quit`), le serveur refuse l'upgrade WebSocket (fermeture immédiate
-   avec code de fermeture applicatif, le client retombe sur l'écran
-   d'accueil).
-
-## Présence / absence d'un joueur (déconnexion individuelle)
-
-Un Joueur peut fermer volontairement sa connexion (bouton "Quitter la
-partie", voir `frontend/src/components/GameControls.tsx`) ou la perdre
-involontairement (réseau, onglet fermé) sans que cela affecte le reste de la
-partie :
-
-1. Dès que le serveur détecte la fermeture de la connexion WS d'un
-   participant de rôle `joueur` (`WebSocketDisconnect` ou exception), il
-   marque ce joueur `connected: false` dans `state.players` et **diffuse
-   immédiatement** `room:state_sync` à toutes les connexions encore actives
-   — pas besoin d'attendre une action quelconque d'un autre participant.
-2. Le joueur absent reste visible dans le classement (`ScoreBoard`, écran de
-   fin) avec ses points actuels, affiché grisé côté client.
-3. Tant qu'au moins un joueur est éligible, la rotation des tours
-   (`currentPlayerIndex`) saute les joueurs `connected: false` et le
-   Présentateur — l'ordre de jeu lui-même (la liste `players`)
-   n'est jamais modifié, seul le calcul du prochain joueur actif en tient
-   compte.
-4. À la reconnexion avec le **même** `localPlayerId` (même room, même code
-   client), le joueur redevient `connected: true` et peut reprendre son tour
-   normalement s'il retombe dessus — aucun rattrapage automatique des tours
-   manqués pendant son absence.
-5. Le Présentateur est lui aussi marqué `connected: false` à sa déconnexion,
-   puis `true` à son retour. L'Écran principal n'est pas dans `players`.
-   La reconnexion d'une entrée absente peut produire un broadcast de présence
-   **et** une synchronisation initiale sur la nouvelle socket. Le client doit
-   accepter ces états répétés. La déconnexion du joueur actif ne réattribue
-   pas immédiatement le tour ; seules les transitions de rotation sautent
-   les absents. Si tous les joueurs sont absents, le repli de rotation peut
-   pointer sur une entrée inéligible (fiabilisation Bloc 13).
-
-## Limitations connues de cette passe (à lever dans une passe ultérieure)
-
-- **Pas de persistance Postgres** : si le process serveur redémarre, toutes
-  les rooms et parties en cours sont perdues. Bloc 2 (schéma + Alembic) et la
-  persistance aux transitions clés (Bloc 5 version complète) ajouteront la
-  survie au redémarrage et l'historique consultable après coup.
-- **Sessions et permissions non consolidées (Bloc 13)** : les identifiants
-  publics servent encore à la reprise, le retrait ne révoque pas l'identité,
-  et les permissions peuvent rester périmées après transfert. Pas de preuve
-  de protection contre l'usurpation. `game:reset` remet actuellement l'index
-  de tour à zéro, qui peut être celui du Présentateur ; Rejouer ne fait pas
-  partie du scénario de référence validé. Ne pas présenter le multi comme
-  sécurisé ni tous les parcours de relance comme validés.
-- **Pas de banque de thèmes prédéfinis ni d'historique/stats** : hors scope
-  de cette passe, prévus respectivement en Bloc 4 (endpoints REST
-  complémentaires) et Bloc 2/5 (persistance).
+Configuration et commande de production : [README](../README.md). Défauts :
+10 rooms, 16 participants/room (Présentateur inclus), 4 écrans, 32 thèmes,
+24 caractères/nom, 100/label; 8192 octets WS et REST; auth 5s, 32 preauth,
+200 sockets authentifiées (anciennes remplacées jusqu'à fermeture comprises),
+envoi/fermeture 2s. Buckets monotones initialement pleins : REST 5/s burst20,
+upgrade 10/s burst20, commandes 20/s burst40/socket et 200/s burst400 global.
+Pas de backlog dormant ni de map IP illimitée; headers proxy non fiables par
+défaut. L'absence de toute socket authentifiée (écrans inclus) démarre un TTL
+monotone de 86400s, sweep 60s annulé/attendu au shutdown. REST, preauth et preuves
+invalides ne rafraîchissent pas ce TTL; auth à la borne d'expiration échoue.

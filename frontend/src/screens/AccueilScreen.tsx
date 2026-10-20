@@ -37,7 +37,7 @@ export function AccueilScreen({ onConnected, initialError = null }: AccueilScree
     setError(null)
     try {
       const result = await createRoom(pseudo.trim())
-      onConnected({ code: result.code, localPlayerId: result.localPlayerId })
+      onConnected({ version: 2, code: result.code, localPlayerId: result.localPlayerId, sessionToken: result.sessionToken, autoResume: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur inconnue.')
     } finally {
@@ -51,7 +51,7 @@ export function AccueilScreen({ onConnected, initialError = null }: AccueilScree
     setError(null)
     try {
       const result = await joinRoom(code.trim(), pseudo.trim(), joinRole)
-      onConnected({ code: result.code, localPlayerId: result.localPlayerId })
+      onConnected({ version: 2, code: result.code, localPlayerId: result.localPlayerId, sessionToken: result.sessionToken, autoResume: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur inconnue.')
     } finally {

@@ -8,11 +8,14 @@ export type Role = 'presentateur' | 'joueur' | 'ecran-principal'
 /** Identité de connexion à une room, persistée en localStorage pour permettre
  * la reconnexion (voir docs/websocket-protocol.md, section "Reconnexion"). */
 export type Identity = {
+  version: 2
   code: string
   localPlayerId: string
+  sessionToken: string
+  autoResume: boolean
 }
 
 export type ErrorPayload = {
-  code: 'forbidden_role' | 'not_your_turn' | 'invalid_phase' | 'invalid_payload' | 'room_not_found'
+  code: string
   message: string
 }

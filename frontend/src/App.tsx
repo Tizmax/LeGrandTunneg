@@ -6,6 +6,7 @@ import {
   clearStoredIdentity,
   loadStoredIdentity,
   storeIdentity,
+  hasLegacyIdentity,
   useRoomConnection,
 } from './net/useRoomConnection'
 import { createNetworkDispatch } from './net/dispatchAdapter'
@@ -19,6 +20,7 @@ import { ScreenShell } from './components/ScreenShell'
 import { GameControls } from './components/GameControls'
 import { CurtainClose } from './components/decor/CurtainClose'
 import { MuteButton } from './components/MuteButton'
+import { Button } from './components/Button'
 import { useAudio } from './audio/AudioContext'
 
 function renderScreen(
@@ -117,13 +119,11 @@ function App() {
  * auparavant appelés après des `return` conditionnels dans App).
  */
 function AppConnected() {
-  // Identité de connexion (code de room + local_player_id) + message
-  // d'erreur éventuel à afficher sur l'accueil, regroupés dans un seul état
-  // pour n'avoir qu'une seule mutation par transition. null tant que
-  // l'utilisateur n'a pas créé/rejoint de room via AccueilScreen, ou après un
-  // room:closed / reconnexion impossible.
+  // Keep the private identity stable during transport recovery; only explicit
+  // create/join or forgetting a session replaces this controller's identity.
   const [session, setSession] = useState<{ identity: Identity | null; connectError: string | null }>(
-    () => ({ identity: loadStoredIdentity(), connectError: null }),
+    () => ({ identity: loadStoredIdentity(), connectError: hasLegacyIdentity()
+      ? 'Ancienne session sans preuve privée. Rejoignez explicitement une room pour continuer.' : null }),
   )
   const { identity, connectError } = session
 
@@ -134,30 +134,6 @@ function AppConnected() {
     setSession({ identity: newIdentity, connectError: null })
   }, [])
 
-  // Synchronise l'état local avec le cycle de vie externe de la connexion
-  // WebSocket (voir net/useRoomConnection.ts) : si la room a été fermée côté
-  // serveur (quit du Présentateur) ou si la connexion a définitivement
-  // échoué (room introuvable/expirée après un redémarrage serveur, la
-  // persistance étant en mémoire uniquement — voir
-  // docs/websocket-protocol.md, section Limitations connues), on efface
-  // l'identité et on repart sur l'accueil avec un message clair.
-  useEffect(() => {
-    if (!identity) return
-    if (connection.status === 'kicked') {
-      clearStoredIdentity()
-      setSession({ identity: null, connectError: 'Vous avez été retiré de la room par le Présentateur.' })
-    } else if (connection.status === 'closed') {
-      clearStoredIdentity()
-      setSession({ identity: null, connectError: 'La room a été fermée par le Présentateur.' })
-    } else if (connection.status === 'error') {
-      clearStoredIdentity()
-      setSession({
-        identity: null,
-        connectError: 'Connexion perdue. La room est peut-être introuvable ou le serveur a redémarré.',
-      })
-    }
-  }, [connection.status, identity])
-
   // ── Ambiance jazz : gérée au niveau de l'App pour persister entre phases ──
   // Jazz démarre dès selection-pending et tourne en continu (tunnel inclus).
   // S'arrête uniquement quand on revient au lobby ou à l'écran de fin.
@@ -165,17 +141,16 @@ function AppConnected() {
   const { startAmbient, stopAmbient } = useAudio()
   const phase = connection.state.phase
   useEffect(() => {
-    if (phase === 'lobby') {
+    if (connection.status !== 'open' || phase === 'lobby') {
       stopAmbient()
     } else if (phase === 'selection-pending' || phase === 'selection' || phase === 'tunnel') {
       startAmbient('jazz')
     } else if (phase === 'end') {
       stopAmbient()
     }
-  // On ne veut relancer l'ambiance QUE sur les changements de phase clés,
-  // pas à chaque re-render. startAmbient/stopAmbient sont stables (useCallback).
+   // Presence-only snapshots must not restart the ambience.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase])
+  }, [phase, connection.status])
 
   // Aucune identité connue (ni fournie, ni retrouvée en localStorage) ->
   // écran d'accueil pour créer/rejoindre une room.
@@ -183,27 +158,43 @@ function AppConnected() {
     return <AccueilScreen onConnected={handleConnected} initialError={connectError} />
   }
 
-  // Le useEffect ci-dessus efface l'identité de façon asynchrone sur
-  // closed/error ; en attendant le prochain rendu (identity encore non-null
-  // le temps du cycle courant), on affiche un écran de connexion neutre
-  // plutôt que de muter l'état pendant le rendu.
-  if (connection.status === 'idle' || connection.status === 'connecting' || !connection.role) {
-    return <ConnectingScreen />
+  if (['closed', 'kicked', 'revoked'].includes(connection.status)) {
+    return <AccueilScreen onConnected={handleConnected} initialError={connection.lastError?.message} />
+  }
+
+  if (['disconnected', 'replaced', 'policy-error'].includes(connection.status)) {
+    return (
+      <ScreenShell spotlight smoke>
+        <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 text-center">
+          <p role="status" className="max-w-lg text-sm text-amber-glow">{connection.lastError?.message}</p>
+          <Button variant="gold" onClick={connection.resume}>Reprendre la session</Button>
+          <Button variant="secondary" onClick={() => {
+            const stored = loadStoredIdentity()
+            if (stored?.code === identity.code && stored.localPlayerId === identity.localPlayerId
+              && stored.sessionToken === identity.sessionToken) clearStoredIdentity()
+            setSession({ identity: null, connectError: null })
+          }}>Oublier cette session</Button>
+        </div>
+      </ScreenShell>
+    )
+  }
+
+  if (connection.status !== 'open' || !connection.role) {
+    return (
+      <div>
+        <ConnectingScreen />
+        <button className="fixed bottom-6 left-1/2 -translate-x-1/2 text-sm text-amber-glow" onClick={connection.disconnect}>
+          Arrêter la reconnexion
+        </button>
+      </div>
+    )
   }
 
   const dispatch = createNetworkDispatch(connection.send)
   const { state, role, localPlayerId } = connection
 
-  // Un Joueur quitte SA partie individuellement : ferme sa propre connexion
-  // et efface son identité locale pour revenir à l'accueil (il peut
-  // rejoindre à nouveau la même room plus tard avec le code). Les autres
-  // participants le voient simplement marqués absents côté serveur — contraste
-  // avec "Terminer la partie" (END_GAME_EARLY) qui est une action du
-  // Présentateur affectant toute la room sans déconnecter personne.
   function handleLeave() {
     connection.disconnect()
-    clearStoredIdentity()
-    setSession({ identity: null, connectError: null })
   }
 
   function handleTransferPresenter(targetPlayerId: string) {
@@ -213,8 +204,12 @@ function AppConnected() {
   return (
     <>
       {shouldShowControls(state.phase) && (
-        <GameControls dispatch={dispatch} role={role} onLeave={handleLeave} />
+        <GameControls dispatch={dispatch} role={role} onLeave={handleLeave}
+          canReset={state.themes.length > 0 && state.players.some((p) => !p.isPresenter && p.connected)} />
       )}
+      <button className="fixed top-3 left-3 z-30 rounded-full border border-white/15 bg-charcoal-900/90 px-3 py-2 text-xs text-[#d8c9b0]"
+        onClick={handleLeave}>Se déconnecter</button>
+      {connection.lastError && <p role="alert" className="fixed bottom-4 left-1/2 z-40 max-w-lg -translate-x-1/2 rounded-xl bg-charcoal-900 p-3 text-center text-sm text-amber-glow">{connection.lastError.message}</p>}
       <TunnelExitCurtain phase={state.phase} />
       {/* Bouton mute flottant — visible sur tous les écrans de jeu */}
       <MuteButton />

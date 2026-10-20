@@ -5,12 +5,14 @@ export type CreateRoomResult = {
   code: string
   localPlayerId: string
   role: 'presentateur'
+  sessionToken: string
 }
 
 export type JoinRoomResult = {
   code: string
   localPlayerId: string
   role: Role
+  sessionToken: string
   // L'état complet n'est pas utilisé directement (le client WS réémet un
   // room:state_sync juste après l'ouverture du socket), mais renvoyé par
   // l'API pour permettre un affichage immédiat avant connexion WS si besoin.
@@ -23,6 +25,7 @@ async function parseJsonOrThrow<T>(response: Response): Promise<T> {
     try {
       const body = await response.json()
       if (typeof body?.detail === 'string') detail = body.detail
+      else if (typeof body?.detail?.message === 'string') detail = body.detail.message
     } catch {
       // ignore, on garde statusText
     }
@@ -44,12 +47,11 @@ export async function joinRoom(
   code: string,
   pseudo: string,
   role: 'joueur' | 'ecran-principal' = 'joueur',
-  localPlayerId?: string,
 ): Promise<JoinRoomResult> {
   const response = await fetch(`${API_BASE_URL}/api/rooms/${code.toUpperCase()}/join`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pseudo, role, localPlayerId }),
+    body: JSON.stringify({ pseudo, role }),
   })
   return parseJsonOrThrow<JoinRoomResult>(response)
 }

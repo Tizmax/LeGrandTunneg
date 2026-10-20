@@ -28,6 +28,8 @@ def two_player_lobby() -> GameState:
     state = GameState()
     state = engine.add_player(state, "p1", "Alice")
     state = engine.add_player(state, "p2", "Bob")
+    state = engine.set_player_connected(state, "p1", True)
+    state = engine.set_player_connected(state, "p2", True)
     return state
 
 
@@ -42,6 +44,7 @@ def started_selection_open(seed: int = 0) -> GameState:
 
 
 def current_player_id(state: GameState) -> str:
+    assert state.current_player_index is not None
     return state.players[state.current_player_index].id
 
 
@@ -263,7 +266,7 @@ def test_select_completed_theme_is_rejected() -> None:
 
 def test_player_can_rename_self_in_lobby() -> None:
     state = two_player_lobby()
-    pid = current_player_id(state)
+    pid = "p1"
     state = engine.rename_player(state, "joueur", pid, "Nouveau nom")
     renamed = next(p for p in state.players if p.id == pid)
     assert renamed.name == "Nouveau nom"
@@ -283,8 +286,15 @@ def test_presenter_can_rename_self_in_lobby() -> None:
 def test_rename_rejected_for_unknown_participant() -> None:
     state = two_player_lobby()
     with pytest.raises(engine.GameError) as exc_info:
-        engine.rename_player(state, "ecran-principal", "screen", "x")
+        engine.rename_player(state, "joueur", "unknown", "x")
     assert exc_info.value.code == "invalid_payload"
+
+
+def test_screen_cannot_rename() -> None:
+    state = two_player_lobby()
+    with pytest.raises(engine.GameError) as exc_info:
+        engine.rename_player(state, "ecran-principal", "screen", "x")
+    assert exc_info.value.code == "forbidden_role"
 
 
 def test_rename_rejected_outside_lobby() -> None:
@@ -297,7 +307,7 @@ def test_rename_rejected_outside_lobby() -> None:
 
 def test_rename_rejected_for_empty_name() -> None:
     state = two_player_lobby()
-    pid = current_player_id(state)
+    pid = "p1"
     with pytest.raises(engine.GameError) as exc_info:
         engine.rename_player(state, "joueur", pid, "   ")
     assert exc_info.value.code == "invalid_payload"
@@ -328,6 +338,8 @@ def test_start_and_rotation_exclude_presenter(seed: int) -> None:
     state = engine.add_player(GameState(), "host", "Paul", is_presenter=True)
     state = engine.add_player(state, "p1", "Alice")
     state = engine.add_player(state, "p2", "Bob")
+    state = engine.set_player_connected(state, "p1", True)
+    state = engine.set_player_connected(state, "p2", True)
     state = engine.add_theme(state, "Musique", "presentateur")
     state = engine.start_game(state, "presentateur", rng=random.Random(seed))
     first_id = current_player_id(state)
@@ -532,7 +544,7 @@ def test_set_player_connected_marks_player_absent() -> None:
 def test_set_player_connected_is_noop_when_already_in_target_state() -> None:
     state = two_player_lobby()
     same_state = engine.set_player_connected(state, "p1", True)
-    # Déjà connecté par défaut : aucune mutation, même objet état renvoyé
+    # Déjà connecté explicitement : aucune mutation, même objet état renvoyé
     # (important pour éviter un broadcast WS parasite, voir app/api/ws.py).
     assert same_state is state
 
@@ -584,7 +596,9 @@ def test_end_game_early_resets_to_lobby_keeping_players_and_themes() -> None:
     assert len(state.themes) == 1
     theme = state.themes[0]
     assert theme.progress_value == 0 and theme.completed is False
-    assert state.current_player_index == 0
+    assert state.current_player_index is None
+    assert state.turn_status == "idle"
+    assert state.rotation_anchor_index is None
     assert state.active_theme_index is None
     assert state.tunnel_sub_phase is None
     assert state.history == ()

@@ -27,6 +27,8 @@ TunnelSubPhase = Literal[
     "after-success-open",  # choice_open : Continuer/Coffrer révélés, cliquables
 ]
 
+TurnStatus = Literal["idle", "ready", "active-absent", "waiting-eligible"]
+
 
 @dataclass(frozen=True)
 class Theme:
@@ -47,10 +49,9 @@ class Player:
     points: int = 0
     # Présence réseau (connexion WebSocket active). Un joueur déconnecté
     # (onglet fermé, perte réseau) n'est PAS retiré de la partie : il reste
-    # affiché pour le classement final, son tour est simplement sauté tant
-    # qu'il est absent, et il reprend sa place s'il se reconnecte (voir
-    # app.game.engine.mark_player_connected). Toujours True par défaut.
-    connected: bool = True
+    # affiché pour le classement final. Une absence pendant son tour suspend
+    # ce tour jusqu'au retour via app.game.engine.set_player_connected.
+    connected: bool = False
     # Identifiant de l'icône de personnage SVG choisie dans le lobby.
     # Ex. "alice", "bob", etc. Toujours assigné au join (tirage aléatoire).
     avatar: str = ""
@@ -71,10 +72,12 @@ class GameState:
     phase: GamePhase = "lobby"
     players: tuple[Player, ...] = field(default_factory=tuple)
     themes: tuple[Theme, ...] = field(default_factory=tuple)
-    current_player_index: int = 0
+    current_player_index: int | None = None
     active_theme_index: int | None = None
     tunnel_sub_phase: TunnelSubPhase | None = None
     history: tuple[HistoryEntry, ...] = field(default_factory=tuple)
+    turn_status: TurnStatus = "idle"
+    rotation_anchor_index: int | None = None
 
 
 def initial_state() -> GameState:
@@ -85,6 +88,7 @@ __all__ = [
     "SquareColor",
     "GamePhase",
     "TunnelSubPhase",
+    "TurnStatus",
     "Theme",
     "Player",
     "HistoryEntry",

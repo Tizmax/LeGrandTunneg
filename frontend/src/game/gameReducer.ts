@@ -40,7 +40,9 @@ export const initialState: GameState = {
   phase: 'lobby',
   players: [],
   themes: [],
-  currentPlayerIndex: 0,
+  currentPlayerIndex: null,
+  turnStatus: 'idle',
+  rotationAnchorIndex: null,
   activeThemeIndex: null,
   tunnelSubPhase: null,
   history: [],
@@ -153,7 +155,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
     }
 
     case 'GOOD_ANSWER': {
-      if (state.activeThemeIndex === null) return state
+      if (state.activeThemeIndex === null || state.currentPlayerIndex === null) return state
       const idx = state.activeThemeIndex
       const theme = state.themes[idx]
       const discoveredFalse: Theme = { ...theme, discovered: false }
@@ -199,6 +201,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
     }
 
     case 'BAD_ANSWER': {
+      if (state.currentPlayerIndex === null) return state
       return {
         ...state,
         phase: 'selection-pending',
@@ -209,7 +212,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
     }
 
     case 'PASS': {
-      if (state.activeThemeIndex === null) return state
+      if (state.activeThemeIndex === null || state.currentPlayerIndex === null) return state
       const idx = state.activeThemeIndex
       const theme = state.themes[idx]
       const nullifiedSquare = theme.progressValue + 1
@@ -279,7 +282,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
 
     case 'COFFRER': {
       // Action du joueur une fois le choix Continuer/Coffrer révélé et tranché.
-      if (state.activeThemeIndex === null || state.tunnelSubPhase !== 'after-success-open') {
+      if (state.activeThemeIndex === null || state.currentPlayerIndex === null || state.tunnelSubPhase !== 'after-success-open') {
         return state
       }
       const idx = state.activeThemeIndex

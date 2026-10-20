@@ -28,7 +28,8 @@ type LobbyScreenProps = {
 export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode, onTransferPresenter }: LobbyScreenProps) {
   const isPresenter = role === 'presentateur'
   const joueurs = state.players.filter((p) => !p.isPresenter)
-  const canStart = joueurs.length >= 2 && state.themes.length >= 1
+  const hasConnectedPlayer = joueurs.some((p) => p.connected)
+  const canStart = joueurs.length >= 2 && state.themes.length >= 1 && hasConnectedPlayer
   const { playEffect } = useAudio()
 
   const [editingSelf, setEditingSelf] = useState(false)
@@ -207,6 +208,11 @@ export function LobbyScreen({ state, dispatch, role, localPlayerId, roomCode, on
               {joueurs.length < 2 && (
                 <p className="mt-4 text-center text-xs text-[#7a6f63]">
                   Minimum 2 joueurs requis pour lancer la partie.
+                </p>
+              )}
+              {!hasConnectedPlayer && (
+                <p className="mt-4 text-center text-xs text-[#7a6f63]">
+                  Au moins un joueur doit être connecté pour lancer la partie.
                 </p>
               )}
             </div>

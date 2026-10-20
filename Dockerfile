@@ -28,6 +28,8 @@ COPY --from=frontend-build /app/frontend/dist ./app/static
 # Railway (et la plupart des PaaS) injectent PORT dynamiquement ; 8000 sert
 # de valeur par défaut pour un `docker run` local sans variable d'env.
 ENV PORT=8000
+ENV APP_ENV=production
 EXPOSE 8000
 
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]
+# Production must explicitly set ALLOWED_ORIGINS to its HTTPS public origin(s).
+CMD ["python", "-m", "app.serve"]

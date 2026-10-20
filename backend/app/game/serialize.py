@@ -39,6 +39,8 @@ def serialize_state(state: GameState) -> dict[str, Any]:
             for t in state.themes
         ],
         "currentPlayerIndex": state.current_player_index,
+        "turnStatus": state.turn_status,
+        "rotationAnchorIndex": state.rotation_anchor_index,
         "activeThemeIndex": state.active_theme_index,
         "tunnelSubPhase": state.tunnel_sub_phase,
         "history": [

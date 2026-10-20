@@ -23,6 +23,7 @@ type TunnelScreenProps = {
 export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScreenProps) {
   const theme = state.activeThemeIndex !== null ? state.themes[state.activeThemeIndex] : null
   const currentPlayer = currentJoueur(state)
+  const suspended = state.turnStatus === 'active-absent' || state.turnStatus === 'waiting-eligible'
   const { playEffect } = useAudio()
 
   const isPresenter = role === 'presentateur'
@@ -84,6 +85,13 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
               {theme.label}
             </h2>
             <ScoreBoard players={joueurs(state)} currentPlayerIndex={currentJoueurIndex(state)} />
+            {suspended && (
+              <p role="status" className="text-sm text-amber-glow">
+                {state.turnStatus === 'active-absent'
+                  ? `Partie suspendue : ${currentPlayer?.name ?? 'le joueur actif'} est déconnecté. Son tour reprendra à son retour.`
+                  : 'Partie suspendue : aucun joueur connecté disponible. En attente du retour d’un joueur.'}
+              </p>
+            )}
           </div>
 
           <div className="animate-rise-up w-full">
@@ -105,12 +113,12 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
             {/* Couche show : question-pending — le Présentateur pose sa
                 question à l'oral puis déclenche lui-même le chrono. */}
             {isPresenter && state.tunnelSubPhase === 'question-pending' && (
-              <Button variant="gold" onClick={handleStartTimer}>
+              <Button variant="gold" disabled={suspended} onClick={handleStartTimer}>
                 <span className="flex items-center gap-2"><Timer size={16} /> Lancer le chrono</span>
               </Button>
             )}
 
-            {role === 'joueur' && state.tunnelSubPhase === 'question-pending' && (
+            {!suspended && role === 'joueur' && state.tunnelSubPhase === 'question-pending' && (
               <p className="text-xs tracking-wide text-[#9a8d7d] uppercase">
                 Écoutez la question…
               </p>
@@ -121,19 +129,19 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
                 réponse) — jamais visible côté Joueur ni Écran principal. */}
             {isPresenter && state.tunnelSubPhase === 'question' && (
               <>
-                <Button variant="primary" onClick={handleGoodAnswer}>
+                <Button variant="primary" disabled={suspended} onClick={handleGoodAnswer}>
                   <span className="flex items-center gap-2"><CheckCircle2 size={16} /> Bonne réponse</span>
                 </Button>
-                <Button variant="danger" onClick={handleBadAnswer}>
+                <Button variant="danger" disabled={suspended} onClick={handleBadAnswer}>
                   <span className="flex items-center gap-2"><XCircle size={16} /> Mauvaise réponse</span>
                 </Button>
-                <Button variant="secondary" onClick={handlePass}>
+                <Button variant="secondary" disabled={suspended} onClick={handlePass}>
                   <span className="flex items-center gap-2"><SkipForward size={16} /> Passer</span>
                 </Button>
               </>
             )}
 
-            {role === 'joueur' && state.tunnelSubPhase === 'question' && (
+            {!suspended && role === 'joueur' && state.tunnelSubPhase === 'question' && (
               <p className="text-xs tracking-wide text-[#9a8d7d] uppercase">
                 Le Présentateur juge la réponse…
               </p>
@@ -147,12 +155,12 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
                 boutons Rester sur scène/Descendre restent masqués tant que
                 le choix n'est pas ouvert. */}
             {isPresenter && state.tunnelSubPhase === 'after-success-pending' && (
-              <Button variant="gold" onClick={handleRevealChoice}>
+              <Button variant="gold" disabled={suspended} onClick={handleRevealChoice}>
                 Lancer le choix
               </Button>
             )}
 
-            {role === 'joueur' && state.tunnelSubPhase === 'after-success-pending' && (
+            {!suspended && role === 'joueur' && state.tunnelSubPhase === 'after-success-pending' && (
               <p className="text-xs tracking-wide text-[#9a8d7d] uppercase">
                 {currentPlayer?.name} va décider…
               </p>
@@ -163,10 +171,10 @@ export function TunnelScreen({ state, dispatch, role, localPlayerId }: TunnelScr
                 aux autres joueurs. */}
             {isCurrentPlayer && state.tunnelSubPhase === 'after-success-open' && (
               <>
-                <Button variant="primary" onClick={() => dispatch({ type: 'CONTINUE' })}>
+                <Button variant="primary" disabled={suspended} onClick={() => dispatch({ type: 'CONTINUE' })}>
                   Rester sur scène
                 </Button>
-                <Button variant="gold" onClick={handleCoffrer}>
+                <Button variant="gold" disabled={suspended} onClick={handleCoffrer}>
                   Descendre
                 </Button>
               </>

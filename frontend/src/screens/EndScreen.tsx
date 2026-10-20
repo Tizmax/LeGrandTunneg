@@ -33,6 +33,7 @@ function biggestSingleCoffrage(state: GameState) {
 
 export function EndScreen({ state, dispatch, role }: EndScreenProps) {
   const ranked = [...joueurs(state)].sort((a, b) => b.points - a.points)
+  const canReset = state.themes.length > 0 && state.players.some((p) => !p.isPresenter && p.connected)
   const { playEffect } = useAudio()
 
   // Fanfare de victoire au montage de l'écran final
@@ -118,7 +119,7 @@ export function EndScreen({ state, dispatch, role }: EndScreenProps) {
             rejetterait de toute façon avec `forbidden_role` sinon). */}
         {role === 'presentateur' && (
           <div className="animate-rise-up flex gap-4">
-            <Button variant="secondary" onClick={() => dispatch({ type: 'RESET_GAME' })}>
+            <Button variant="secondary" disabled={!canReset} title={!canReset ? 'Un thème et un joueur connecté sont requis.' : undefined} onClick={() => dispatch({ type: 'RESET_GAME' })}>
               <span className="flex items-center gap-2"><RotateCcw size={15} /> Rejouer</span>
             </Button>
             <Button variant="ghost" onClick={() => dispatch({ type: 'QUIT_TO_MENU' })}>

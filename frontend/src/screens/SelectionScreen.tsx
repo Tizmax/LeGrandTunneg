@@ -43,7 +43,9 @@ type SelectionScreenProps = {
 export function SelectionScreen({ state, dispatch, role, localPlayerId }: SelectionScreenProps) {
   const currentPlayer = currentJoueur(state)
   const revealed = state.phase === 'selection'
-  const isInteractive = revealed && role === 'joueur' && currentPlayer?.id === localPlayerId
+  const suspended = state.turnStatus === 'active-absent' || state.turnStatus === 'waiting-eligible'
+  const isInteractive = !suspended && revealed && role === 'joueur' && currentPlayer?.id === localPlayerId
+  const canReset = state.themes.length > 0 && state.players.some((p) => !p.isPresenter && p.connected)
   const { playEffect } = useAudio()
 
   return (
@@ -51,20 +53,27 @@ export function SelectionScreen({ state, dispatch, role, localPlayerId }: Select
       <div className="flex flex-1 flex-col gap-8 py-4">
         <div className="animate-rise-up flex flex-col items-center gap-4 text-center">
           <h2 className="marquee-text font-display text-3xl font-bold sm:text-4xl">
-            {currentPlayer?.name} monte sur scène
+            {currentPlayer ? `${currentPlayer.name} monte sur scène` : 'En attente d’un joueur'}
           </h2>
           <ScoreBoard players={joueurs(state)} currentPlayerIndex={currentJoueurIndex(state)} />
+          {suspended && (
+            <p role="status" className="text-sm text-amber-glow">
+              {state.turnStatus === 'active-absent'
+                ? `Partie suspendue : ${currentPlayer?.name ?? 'le joueur actif'} est déconnecté. Son tour reprendra à son retour.`
+                : 'Partie suspendue : aucun joueur connecté disponible. En attente du retour d’un joueur.'}
+            </p>
+          )}
           {!revealed && role === 'presentateur' && (
-            <Button variant="gold" onClick={() => { playEffect('reveal'); dispatch({ type: 'REVEAL_CHOICE' }) }}>
+            <Button variant="gold" disabled={suspended} onClick={() => { playEffect('reveal'); dispatch({ type: 'REVEAL_CHOICE' }) }}>
               Lancer le choix
             </Button>
           )}
-          {!revealed && role !== 'presentateur' && (
+          {!suspended && !revealed && role !== 'presentateur' && (
             <p className="text-xs tracking-wide text-[#9a8d7d] uppercase">
               Le Présentateur va bientôt lancer le choix…
             </p>
           )}
-          {revealed && role === 'presentateur' && (
+          {!suspended && revealed && role === 'presentateur' && (
             <p className="text-xs tracking-wide text-[#9a8d7d] uppercase">
               En attente du choix du joueur
             </p>
@@ -125,7 +134,7 @@ export function SelectionScreen({ state, dispatch, role, localPlayerId }: Select
 
         {role === 'presentateur' && (
           <div className="animate-rise-up flex justify-center gap-4 pt-4">
-            <Button variant="secondary" onClick={() => dispatch({ type: 'RESET_GAME' })}>
+            <Button variant="secondary" disabled={!canReset} title={!canReset ? 'Un thème et un joueur connecté sont requis.' : undefined} onClick={() => dispatch({ type: 'RESET_GAME' })}>
               <span className="flex items-center gap-2"><RotateCcw size={15} /> Réinitialiser</span>
             </Button>
             <Button variant="ghost" onClick={() => dispatch({ type: 'QUIT_TO_MENU' })}>
