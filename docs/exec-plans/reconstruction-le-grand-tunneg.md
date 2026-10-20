@@ -1,12 +1,121 @@
 ---
 status: draft
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-20
 ---
 
-## Goal
+## Functional objective
+
+Permettre à un très petit groupe (moins de cinq rooms simultanées) d'utiliser régulièrement Le Grand Tunneg comme un service durable sur Railway. Préserver la partie multijoueur déjà fonctionnelle, fiabiliser sessions, permissions et tests, puis sauvegarder et reprendre les parties après redéploiement avant de compléter historique, profils et fonctions secondaires.
+
+### Objectif historique de reconstruction
 
 Reconstruire intégralement "Le Grand Tunneg" — jeu de plateau/quiz façon Fort Boyard — en quittant l'architecture Flask/session-cookie/Alpine.js monoposte de l'original pour une application web (FastAPI + WebSocket + React/Vite/Tailwind + Postgres) proposant deux modes de room (multi-device temps réel, et solo hotseat mono-écran), avec un rôle Présentateur central qui juge les réponses orales et orchestre le rythme du show (délai de révélation des choix joueur façon jeu télé), une direction artistique "Jazz Club feutré / La La Land" soignée, et un déploiement Railway propre en un seul service.
+
+## Réorientation acceptée — service durable à faible fréquentation (2026-10-20)
+
+### Objectif fonctionnel actuel
+
+Préserver le parcours multijoueur qui fonctionne déjà et permettre son utilisation régulière par un petit groupe, sans perte de partie lors d'un redéploiement et sans confusion de permissions. La priorité acceptée par l'utilisateur est : stabiliser le multijoueur, puis ajouter sauvegarde et reprise, puis historique et profils ; le solo et les enrichissements viennent ensuite. La reconstruction initiale reste le contexte historique, pas une invitation à réécrire le jeu.
+
+### Current context
+
+**Observed facts**
+- L'utilisateur confirme le 2026-10-20 qu'une version Railway est actuellement en déploiement et qu'une partie complète fonctionne. Cette confirmation est une preuve d'usage rapportée, pas un test exécuté pendant l'état des lieux.
+- La fréquentation attendue est inférieure à cinq rooms simultanées ; la cible est un service durable accessible à très peu de personnes à la fois.
+- La lecture du dépôt confirme le moteur Python indépendant du transport, les rooms en mémoire, les interfaces multi, les avatars, le transfert de Présentateur, les animations, le podium et le plus gros coffrage.
+- L'audio existe dans `frontend/src/audio/` : sons synthétisés, ambiance jazz et préférences locales. Son existence ne vaut pas validation complète sur navigateurs réels.
+- Postgres n'est pas branché ; aucune migration n'est présente dans le backend inspecté. Historique durable, profils cumulés, banque de thèmes et parcours solo restent à construire.
+- Des tests d'intégration et le protocole décrivent encore l'ancien modèle sans Présentateur dans `players`, alors que le code le représente désormais avec `isPresenter: true` et exclut son tour et son classement de joueur.
+- Aucun test ni build n'a été exécuté pendant cet état des lieux ; aucune garantie de suite actuellement verte n'est donnée.
+
+**Inferences**
+- Le besoin prioritaire est la continuité et la fiabilité, pas la capacité de traitement.
+- Les identifiants publics des participants sont diffusés dans l'état, mais servent aussi à ouvrir les connexions : il faut séparer identité publique et preuve de session avant de considérer les permissions fiables.
+- Le rôle conservé au début d'une connexion peut devenir périmé après un transfert de Présentateur ; les autorisations doivent être évaluées sur l'état serveur courant.
+- Le reset à l'index zéro peut désigner le Présentateur depuis son intégration à `players` ; la relance doit choisir un joueur éligible.
+- Le client ne possède pas de boucle de reconnexion automatique et efface l'identité sur fermeture : la reprise durable exige aussi une évolution du navigateur, pas seulement une base.
+- Les règles Python et TypeScript existent séparément et divergent déjà. Le partage strict du moteur en solo reste un problème à résoudre, pas une propriété acquise.
+
+**Unknowns**
+- Configuration réelle du service Railway, offre Postgres, sauvegardes disponibles, procédure de restauration et durée d'interruption acceptable.
+- Durée souhaitée de conservation des parties et profils ; objectifs chiffrés de perte de données et de délai de restauration.
+- Résultats actuels des tests et correspondance exacte entre la révision déployée et le dépôt inspecté.
+
+### Target
+
+```text
+[Navigateurs]
+      |
+[FastAPI unique]
+      |
+[Moteur de jeu]
+      |
+[Postgres]
+```
+
+Les navigateurs affichent et transmettent les commandes. FastAPI authentifie les sessions, vérifie les permissions courantes et orchestre les actions. Le moteur reste indépendant du transport et de la base. Postgres conserve les états et événements ; les connexions et verrous restent temporaires en mémoire.
+
+### Decisions and trade-offs
+
+- **Option retenue explicitement par l'utilisateur** : stabiliser le multijoueur puis le rendre persistant, sans réécriture. Préserver le monorepo, FastAPI, React et le service applicatif unique Railway, avec Postgres comme service de données associé.
+- **Option viable mais écartée comme cible durable** : conserver uniquement les rooms en mémoire pour des soirées encadrées ; simple, mais perte des parties à chaque redémarrage.
+- **Option différée** : développer d'abord le solo et les enrichissements ; apporte des usages mais étend la surface de régression avant consolidation.
+- Un seul processus applicatif propriétaire des rooms actives dans cette phase. Ne pas activer plusieurs workers ou réplicas : Postgres seul ne synchronise pas leurs états en mémoire. Redis, microservices et architecture distribuée ne sont pas justifiés par moins de cinq rooms.
+- Pseudos sans mot de passe conservés. Un identifiant de profil/participant public n'est jamais une preuve d'identité : ajouter un secret de session vérifié côté serveur, non diffusé aux autres participants. Le mécanisme exact, sa durée et son renouvellement sont à documenter avant réalisation ; pas d'obligation de JWT ni de comptes forts.
+- Sauvegarde par snapshot complet versionné et journal d'événements utiles dans une même transaction pour chaque commande durable acceptée. Ne pas introduire de reconstruction par rejeu de tous les événements.
+- L'état accepté est calculé par le moteur, enregistré, puis publié en mémoire et diffusé. En cas d'échec de transaction, aucun succès ni nouvel état non durable n'est annoncé. La fin de partie et les statistiques ne doivent pas être créditées deux fois après reprise ou nouvelle tentative.
+- Reprise après redéploiement, reconnexion navigateur et restauration de sauvegarde sont des critères distincts, tous nécessaires à la durabilité. Ne pas promettre d'absence totale d'interruption lors d'un déploiement à processus unique.
+
+### Incremental migration path
+
+```text
+[Jeu actuel]
+      |
+[Tests et sessions fiables]
+      |
+[Sauvegarde transactionnelle]
+      |
+[Reprise et restauration]
+      |
+[Historique et profils]
+      |
+[Solo et enrichissements]
+```
+
+Chaque palier conserve le jeu multi et ajoute une garantie vérifiable. L'ordre d'exécution ci-dessous remplace l'ordre numérique historique des blocs :
+
+1. **Référence et garde-fous** — Bloc 12 puis première tranche du Bloc 10 : aligner protocole/tests sur le modèle actuel, automatiser tests, lint et build ; consigner la révision de référence et le scénario complet validé.
+2. **Sessions et fonctionnement fiable** — Bloc 13 : identité, permissions après transfert, relance, déconnexions, messages malformés et protections raisonnables des ressources. Vérifier une partie à quatre clients avec transfert et Rejouer, sans modifier les règles métier.
+3. **Stockage** — Bloc 2 puis complément du Bloc 5 : introduire une interface de stockage, des migrations additives et la sauvegarde transactionnelle ; conserver le contrat réseau existant autant que possible.
+4. **Reprise réelle** — Bloc 14 : restaurer les rooms, reconnecter les clients, tester un redéploiement et une restauration de sauvegarde sur un environnement de test Railway avant activation durable.
+5. **Fonctions durables** — Bloc 15 et compléments des Blocs 4/7 : historique et profils, puis statistiques finales et banque de thèmes.
+6. **Fonctions différées** — Bloc 7bis après décision technique sur le moteur solo ; finaliser audio, documentation et tests de parité sans retarder la première CI.
+
+**Compatibilité et retour arrière** : livrer les changements de session avec une stratégie documentée pour les anciennes sessions (transition bornée ou reconnexion explicite, jamais maintien indéfini de l'UUID public comme secret). Planifier une fenêtre sans partie active tant que les anciennes rooms en mémoire ne peuvent pas être migrées. Pour Postgres, tester les migrations sur une copie et garder un ancien binaire compatible avec le nouveau schéma ; ne pas revenir vers une version ignorant les sauvegardes si cela ferait perdre des actions déjà confirmées. Une fois la durabilité activée, une panne de base doit produire un refus clair des mutations, pas un repli silencieux en mémoire. Les points de retour arrière sont à valider avant chaque activation.
+
+### État des blocs au 2026-10-20
+
+Une case cochée signifie que tous les critères du bloc sont établis ; « code présent », « partiel » et « validé » doivent rester distincts. Le nombre de cases ne représente pas un pourcentage d'avancement.
+
+| Bloc | État établi / reste à faire |
+|---|---|
+| 1 | Socle construit ; conservé. |
+| 2 | À faire : modèle, migrations et intégration Postgres. |
+| 3 | Protocole présent mais à réaligner sur participants, avatars, transfert, sessions et reprise. |
+| 4 | Moteur et API multi présents ; tests à réaligner, API historique/stats/banque et solo non réalisés. |
+| 5 | Temps réel mémoire présent ; permissions/session/reconnexion à fiabiliser et persistance absente. |
+| 6 | Design system présent ; conservé. |
+| 7 | Parcours multi fonctionnel confirmé par l'utilisateur ; solo, banque et statistiques finales complètes manquent au périmètre initial. |
+| 7bis | Non réalisé ; différé, architecture du moteur à clarifier avant réalisation. |
+| 8 | Audio implémenté ; validation complète, politique de diffusion sonore multi-écrans et documentation restantes. |
+| 9 | Packaging présent et version Railway signalée en déploiement ; critères de configuration durable à terminer avec Postgres/sessions. |
+| 10 | Tests backend présents, certains périmés ; CI et tests frontend à faire. Première tranche prioritaire, sans dépendre du solo. |
+| 11 | README/protocole présents ; mise à jour opérationnelle et schéma à compléter. |
+| 12–15 | Nouveaux compléments de consolidation décrits ci-dessous. |
+| 16–18 | Nouvelle dimension demandée : contrat de bibliothèque, saisie/conservation des contenus, réutilisation et lecture privée en régie. À construire après consolidation, décisions de partage/sélection à préciser. |
+
+**Règle de priorité documentaire** : cette réorientation et les annotations datées du 2026-10-20 priment sur les descriptions historiques contradictoires ci-dessous. Les règles métier restent inchangées ; le Présentateur peut être représenté dans la liste technique des participants sans devenir un joueur éligible aux tours/points. Un panneau caché dans l'interface ne garantit pas la confidentialité des données déjà envoyées au navigateur. Le rapport `docs/review.md` est un inventaire historique à requalifier, pas une liste de correctifs à appliquer aveuglément (notamment ne pas marquer un thème terminé après un coffrage avant la case 10).
 
 ## Contexte de référence (lecture obligatoire avant d'implémenter la logique de jeu)
 
@@ -90,7 +199,7 @@ Un thème avec `completed == true` (coffré jusqu'à la case 10) doit être non-
 1. **Deux types de room à la création** : l'écran de création propose deux choix — **"Créer une room multi"** (mis en avant visuellement, choix principal) et **"Créer une room solo"** (option secondaire, moins mise en avant).
    - **Room multi** : chaque participant rejoint une room via code depuis son propre navigateur. Prévoir en plus des vues individuelles un rôle/vue "Écran principal" pour un affichage collectif unique (vidéoprojecteur/TV partagée).
    - **Room solo (NOUVEAU)** : hotseat local pur sur un seul navigateur — pas de code de room à partager, pas de WebSocket ni de synchronisation multi-device nécessaire pour ce mode ; un même écran bascule manuellement entre la vue Présentateur et la vue de chaque Joueur à tour de rôle, reproduisant le fonctionnement mono-écran de l'ancien jeu Flask. La partie peut être non persistée en base, ou persistée de façon simplifiée, au choix de l'implémenteur du Bloc concerné (ce n'est pas le cœur de la logique multi-device). Ce mode réutilise impérativement le même moteur de règles de jeu (Bloc 4) que le mode multi — seule la couche transport/affichage diffère, jamais la logique de jeu.
-2. **Rôle Présentateur central et obligatoire** (renommé depuis "Animateur") : crée la room, ne fournit aucune question (posées à l'oral depuis son propre support externe), choisit/saisit la liste des thèmes de la partie en phase de setup/lobby, est seul habilité à valider **Bonne réponse / Mauvaise réponse / Passer** (jugement de la réponse orale — lui seul connaît la réponse), et déclenche le **timing d'ouverture** des choix joueur (voir couche "show" dans la spécification figée). Il peut désigner un autre participant comme nouveau Présentateur **uniquement dans le lobby, jamais en cours de partie** (un seul Présentateur actif à la fois). Les joueurs choisissent eux-mêmes le thème qu'ils veulent tenter à leur tour, et choisissent eux-mêmes **Continuer vs Coffrer** après une bonne réponse non terminale (NOUVEAU — ce pouvoir de décision appartient au joueur concerné, pas au Présentateur) ; mais ne valident jamais eux-mêmes leurs réponses orales.
+2. **Rôle Présentateur central et obligatoire** (renommé depuis "Animateur") : crée la room, choisit/saisit la liste des thèmes de la partie en phase de setup/lobby et pose les questions à l'oral. Actuellement son support est externe ; à terme il pourra préparer, conserver et réutiliser ses thèmes, leurs questions et des réponses types indicatives dans l'application (amendement utilisateur du 2026-10-20, Blocs 16–18), est seul habilité à valider **Bonne réponse / Mauvaise réponse / Passer** (jugement de la réponse orale — lui seul connaît la réponse), et déclenche le **timing d'ouverture** des choix joueur (voir couche "show" dans la spécification figée). Il peut désigner un autre participant comme nouveau Présentateur **uniquement dans le lobby, jamais en cours de partie** (un seul Présentateur actif à la fois). Les joueurs choisissent eux-mêmes le thème qu'ils veulent tenter à leur tour, et choisissent eux-mêmes **Continuer vs Coffrer** après une bonne réponse non terminale (NOUVEAU — ce pouvoir de décision appartient au joueur concerné, pas au Présentateur) ; mais ne valident jamais eux-mêmes leurs réponses orales.
 3. **Authentification légère** : pseudo libre sans mot de passe pour rejoindre une room. Pas de compte email/mot de passe. Un identifiant local (ex. UUID stocké côté navigateur) permet de réconcilier le même joueur entre sessions pour les statistiques cumulées (mécanisme exact posé en Décision log ci-dessous).
 4. **Persistance Postgres (Railway)** : historique des parties jouées, profils joueurs avec stats cumulées (parties jouées, victoires, meilleur thème, etc.), et reprise d'une partie en cours après rechargement/déconnexion (granularité exacte posée en Décision log).
 5. **Stack imposée** : Backend FastAPI (Python) ; Frontend React + Vite + Tailwind CSS ; communication temps réel exclusivement via WebSocket natif FastAPI (pas de polling) pour synchroniser tous les écrans d'une room (tours, scores, progression, état des cases).
@@ -108,6 +217,8 @@ Un thème avec `completed == true` (coffré jusqu'à la case 10) doit être non-
 - Protocole WebSocket documenté couvrant tous les événements de jeu et les 3 rôles (Présentateur, Joueur, Écran principal) pour le mode room multi, y compris les nouveaux messages de la couche show (`choice_pending` / `choice_open`).
 - Moteur de règles de jeu backend fidèle à la spécification figée ci-dessus (y compris la couche show et le partage de pouvoirs Présentateur/Joueur), avec tests unitaires — moteur partagé/réutilisé à l'identique par le mode room solo.
 - Endpoints REST pour création/jointure de room, banque de thèmes prédéfinis, historique et stats.
+- Bibliothèque persistante alimentée par les Présentateurs : création et modification de thèmes, saisie des questions associées et de réponses types purement indicatives ; consultation et réutilisation dans des parties futures, indépendamment de la durée de vie d'une room.
+- Préparation d'une partie à partir de cette bibliothèque et consultation des questions/réponses dans la régie Présentateur. Le jugement oral et les commandes Bonne réponse/Mauvaise réponse/Passer restent inchangés. Les règles de partage et d'affectation des questions sont à confirmer avant réalisation (Blocs 16–18).
 - Handlers WebSocket avec enforcement des permissions par rôle (distinguant actions de jugement de réponse réservées au Présentateur, actions de choix réservées au joueur concerné, et déclenchement de révélation réservé au Présentateur) et persistance aux transitions clés.
 - Design system React conforme à la DA imposée + tous les écrans listés en Bloc 7, incluant l'écran d'attente/suspense joueur et le contrôle "Lancer le choix" côté Présentateur.
 - Intégration audio (effets + ambiance) avec contrôle de volume/mute.
@@ -116,7 +227,8 @@ Un thème avec `completed == true` (coffré jusqu'à la case 10) doit être non-
 - Documentation de setup local et de déploiement.
 
 ### Out of scope
-- Génération ou fourniture d'une banque de questions avec réponses (l'app ne fournit jamais le contenu des questions elles-mêmes, uniquement les thèmes).
+- Génération automatique de questions/réponses et fourniture éditoriale d'une banque préremplie. En revanche, la saisie, la conservation et la réutilisation des thèmes, questions et réponses indicatives fournis par les Présentateurs font désormais partie du périmètre (amendement utilisateur du 2026-10-20, Blocs 16–18).
+- Validation automatique, comparaison textuelle ou attribution automatique d'un verdict à partir d'une réponse type : le jugement reste exclusivement humain.
 - Authentification forte (email/mot de passe, OAuth, 2FA).
 - Application mobile native.
 - Internationalisation (l'app reste en français).
@@ -127,6 +239,50 @@ Un thème avec `completed == true` (coffré jusqu'à la case 10) doit être non-
 - Changement de Présentateur en cours de partie (uniquement possible dans le lobby, voir décisions actées).
 - Système de "réclamation d'historique" pour fusionner les stats de deux pseudos différents utilisés par la même personne.
 
+## Dimension questions/réponses — besoin utilisateur accepté (2026-10-20)
+
+### Current context
+
+**Observed facts** : l'utilisateur indique que les questions sont actuellement lues depuis un support annexe. `Theme` dans `backend/app/game/types.py` ne contient ni question ni réponse ; `LobbyScreen.tsx` saisit seulement le libellé du thème, et `serialize_state` diffuse le même contenu de jeu à tous les rôles. Aucun contenu questions/réponses n'a été intégré par cette mise à jour documentaire.
+
+**Inferences** : le contenu réutilisable doit survivre à la room et être distingué de la progression d'un thème dans une partie. Ajouter des réponses dans l'état commun exposerait ces réponses aux joueurs, même avec un panneau caché. La politique de questions peut aussi modifier l'équité : une case reste contestable après une mauvaise réponse, donc l'association question/case ne doit pas être improvisée.
+
+**Unknowns** : bibliothèque personnelle, partagée avec des personnes autorisées ou commune au groupe ; droits de modification ; nombre et ordre des questions ; choix manuel ou affectation aux dix cases ; question conservée ou renouvelée après échec ; possibilité de créer du contenu pendant la partie. Aucune de ces politiques n'est considérée acceptée à ce stade.
+
+### Target
+
+Le Présentateur peut saisir ses thèmes, les questions de chaque thème et des réponses types indicatives, conserver ces contenus après la partie, puis les réutiliser lors de parties futures. Le stock de contenus s'enrichit progressivement par saisie humaine. L'application n'utilise jamais les réponses types pour valider les réponses des joueurs : le Présentateur reste seul juge et lit les questions à l'oral.
+
+### Decisions and trade-offs
+
+- **Besoin explicitement demandé, à réaliser** : bibliothèque persistante de contenus fournis par les Présentateurs, préparation/réutilisation des contenus et support de lecture dans la régie. Cette demande remplace l'ancien hors-périmètre « l'app ne fournit jamais les questions ». Elle ne demande ni génération automatique, ni questions préremplies, ni verdict automatique.
+- **Alternative actuelle** : conserver uniquement les libellés et le support externe. Elle reste un chemin de compatibilité pendant la transition, mais ne satisfait pas la capitalisation souhaitée.
+- **Alternative minimale** : conserver les questions uniquement dans une partie. Plus simple mais insuffisant : la réutilisation dépendrait de l'historique des rooms.
+- **Proposition recommandée, à confirmer au Bloc 16** : séparer bibliothèque éditable et copie de contenu utilisée pour une partie, avec références d'origine. Cela permet de corriger la bibliothèque sans changer rétroactivement une question en cours ou l'historique. Coût : données dupliquées et règles de copie/édition à expliciter. Une version immuable référencée est une autre solution réaliste ; ne pas imposer un système complet de versions sans besoin.
+- **Frontière de sécurité à respecter** : réponses types et questions futures réservées aux personnes autorisées à préparer/présenter ; aucun envoi dans l'état commun des joueurs/Écran principal. Si l'affichage public de la question courante devient souhaité, il nécessite une décision distincte. Le rôle Présentateur d'une room ne donne pas automatiquement accès à toutes les bibliothèques des autres.
+- **Priorité** : la consolidation/sauvegarde/reprise multi reste première. Prévoir les limites et relations du futur contenu dans le travail de schéma, sans faire dépendre la première sauvegarde de partie de toutes les fonctionnalités éditoriales. Ne pas fusionner cette bibliothèque utilisateur avec une hypothétique banque éditoriale prédéfinie.
+
+### Incremental migration path
+
+```text
+[Saisie Présentateur]
+        |
+[Bibliothèque persistante]
+        |
+[Préparation de partie]
+        |
+[Régie : lecture et repères]
+        |
+[Verdict humain]
+```
+
+La saisie alimente des contenus durables, indépendants des rooms. La préparation choisit ce qui sera utilisé dans une partie. La régie consulte ces contenus avec des droits spécifiques ; seul le verdict humain appelle les règles de progression et de points.
+
+1. Bloc 16 : confirmer partage, droits, sélection et comportement des nouvelles tentatives ; documenter le contrat sans modifier les règles existantes.
+2. Bloc 17 : livrer création, édition, conservation et consultation de la bibliothèque avec migrations additives et tests d'accès. La suppression d'une room ne supprime aucun contenu de bibliothèque ; la politique de suppression/archivage de contenu doit préserver les parties existantes.
+3. Bloc 18 : ajouter sélection pour une partie et lecture privée en régie ; conserver le mode support externe pour les anciens thèmes. Sauvegarder le contenu de partie et la question courante selon la politique retenue, afin de reprendre exactement après redémarrage.
+4. Vérifier deux parties successives réutilisant le même thème et ses questions, puis un redéploiement et une restauration de sauvegarde. L'ancien parcours reste disponible tant que cette chaîne n'est pas validée. Ne pas revenir vers un binaire ignorant les états de parties enrichis sans compatibilité testée.
+
 ## Esquisse du modèle de données (guidage pour Bloc 2, le database-architect finalise le DDL exact)
 
 - `player_profiles` : identité persistante légère — `local_player_id` (UUID, clé primaire logique côté client), `pseudo` (dernier pseudo utilisé, mutable), `games_played`, `games_won`, `best_theme`, timestamps.
@@ -136,6 +292,14 @@ Un thème avec `completed == true` (coffré jusqu'à la case 10) doit être non-
 - `game_themes` : `game_id`, `label`, `progress_value`, `validated_squares`, `discovered`, `completed`, `nullified` (array ou JSON).
 - `game_events` : journal append-only (`game_id`, `type`, `payload_json`, `created_at`, `actor_local_player_id`) pour l'historique/audit et le calcul des stats de fin de partie (plus gros coup risqué, plus gros coffrage) — pas destiné au replay/reconstruction d'état (voir Décision log).
 - Index attendus : `rooms.code` unique (parmi les valeurs non nulles — nul autorisé pour une room solo sans code à partager), `player_profiles.local_player_id` unique, `game_events.game_id`.
+
+### Extension de données questions/réponses (indicative, à finaliser après Bloc 16)
+
+- Contenus de bibliothèque : thèmes identifiés de façon stable et questions associées, libellé/énoncé, réponse(s) indicative(s), auteur/propriétaire ou périmètre de partage, dates et statut d'archivage selon la politique retenue. Un même libellé ne doit pas fusionner arbitrairement deux thèmes.
+- Séparer l'identité du créateur durable de son rôle temporaire de Présentateur dans une room. La perte de stockage navigateur et l'accès aux contenus doivent avoir une limite clairement documentée, cohérente avec les profils légers ; ne pas présumer de comptes forts.
+- Contenu utilisé en partie : lien vers la source et copie figée ou version immuable selon décision du Bloc 16 ; sélection/ordre/question courante et tentatives seulement selon politique confirmée. Ne pas supposer exactement dix questions par thème parce que le tunnel comporte dix cases.
+- Intégrité : fermeture, reset ou purge d'une room n'effacent pas la bibliothèque ; modification/archivage de la source n'altèrent pas une partie existante. Les sauvegardes/restaurations couvrent bibliothèque et contenus de partie.
+- Projections réseau séparées : état public du jeu sans réponses ni questions futures ; accès privé autorisé à la bibliothèque et à la régie. La réponse type n'entre jamais dans les fonctions de scoring ou de jugement automatique.
 
 ## Building blocks
 
@@ -150,17 +314,20 @@ Un thème avec `completed == true` (coffré jusqu'à la case 10) doit être non-
   - Depends on : Bloc 1.
   - Bloquant à résoudre avant finalisation : voir Open questions (granularité de persistance, mécanisme d'identité, persistance du mode solo).
 
-- [x] **Bloc 3 — Spécification du protocole WebSocket (mode room multi)**
+- [ ] **Bloc 3 — Spécification du protocole WebSocket (mode room multi)**
+  - État 2026-10-20 : document existant, bloc rouvert pour alignement sur le code actuel puis sessions/reprise ; ne pas attendre Postgres pour corriger le contrat courant.
   - Déliverable : document `docs/websocket-protocol.md` listant chaque type de message (ex. `room:join`, `room:state_sync`, `role:assign`, `theme:select`, `choice:pending`, `choice:reveal`, `answer:good`, `answer:bad`, `answer:pass`, `answer:continue`, `answer:vault`, `turn:changed`, `game:ended`, `error`), sa direction (client→serveur / serveur→client / broadcast room), le **rôle exact autorisé à l'émettre** — en distinguant explicitement trois catégories : (1) jugement de réponse orale (`answer:good`/`answer:bad`/`answer:pass`) réservé au Présentateur, (2) choix de jeu du joueur (`theme:select`, `answer:continue`/`answer:vault`) réservé au joueur concerné et acceptés par le serveur uniquement si l'état courant est `choice:open` pour ce joueur, (3) déclenchement de révélation (`choice:reveal`) réservé au Présentateur — la forme JSON exacte du payload de chaque message, et la stratégie de reconnexion (comment un client qui se reconnecte récupère l'état courant complet de la room, y compris un `choice:pending` en cours).
   - Done when : chaque action de jeu de la spécification figée (Bonne réponse, Mauvaise réponse, Passer, Continuer, Coffrer, sélection de thème, reset, fin de partie) a un message WS correspondant documenté avec enforcement de rôle explicite ; le cycle `choice:pending` → `choice:reveal` → `choice:open` est documenté pour la sélection de thème ET pour Continuer/Coffrer, avec le rôle autorisé à faire avancer chaque transition ; le flux de reconnexion est décrit étape par étape.
   - Depends on : Bloc 2 (le protocole doit refléter les formes de données du schéma).
 
-- [x] **Bloc 4 — Backend FastAPI : moteur de règles + endpoints REST + tests unitaires**
+- [ ] **Bloc 4 — Backend FastAPI : moteur de règles + endpoints REST + tests unitaires**
+  - État 2026-10-20 : moteur/API multi construits ; bloc rouvert car critères complets non établis. Fiabiliser les tests avant persistance, puis compléter historique/stats/banque après celle-ci. La solution de partage du moteur solo reste à décider avant le Bloc 7bis.
   - Déliverable : module(s) Python pur(s), découplés de tout transport (réutilisables tels quels par le mode room multi via Bloc 5 ET par le mode room solo hotseat), implémentant exactement la spécification figée (barème de points, coloration des cases, `coffrer`, `poursuivre`, gestion de `nullified`/`discovered`, garde-fou thème complété, reset vs quitter la partie, sous-état `choice_pending`/`choice_open` pour la sélection de thème et pour Continuer/Coffrer, coffrage automatique en case 10 qui ne passe jamais par cet état intermédiaire) + endpoints REST (création de room multi ou solo, jointure, banque de thèmes prédéfinis, historique, stats joueur) avec validation d'input (longueur pseudo/thème, nombre min de joueurs ≥2, nombre min de thèmes ≥1, caractères autorisés).
   - Done when : suite `pytest` verte couvrant au minimum : barème de points par palier (1/2/3/5), coffrage automatique en case 10 (sans passage par `choice_pending`), non-perte de progression sur mauvaise réponse, non-gain définitif sur case passée même après coffrage ultérieur, vol de progression par un autre joueur, rejet de sélection d'un thème `completed`, comportement distinct reset-partie vs quitter-partie, transition `choice_pending` → `choice_open` déclenchable uniquement par une action "Présentateur" et rejet d'un choix joueur tant que l'état est encore `choice_pending` ; endpoints REST testés manuellement ou via `pytest` + client de test FastAPI.
   - Depends on : Bloc 2, Bloc 3.
 
-- [x] **Bloc 5 — WebSocket handlers + gestion d'état de room + persistance (mode room multi)**
+- [ ] **Bloc 5 — WebSocket handlers + gestion d'état de room + persistance (mode room multi)**
+  - État 2026-10-20 : transport et rooms mémoire présents ; bloc rouvert pour sessions/permissions, reconnexion et persistance transactionnelle. Le snapshot et les événements sont enregistrés à chaque commande durable acceptée, pas seulement en fin de tour. Toute mise à jour des profils en fin de partie doit résister aux nouvelles tentatives sans double comptage.
   - Déliverable : gestionnaire de rooms en mémoire (process-local) orchestrant les connexions WebSocket selon le protocole du Bloc 3, enforcement des permissions par rôle en respectant la répartition fine actée (seul le Présentateur peut juger une réponse orale — Bonne réponse/Mauvaise réponse/Passer — et reset/quitter ; seul le joueur concerné peut sélectionner un thème à son tour ou trancher Continuer/Coffrer, et seulement une fois l'état `choice_open` pour lui ; seul le Présentateur peut déclencher la transition `choice_pending` → `choice_open` via `choice:reveal`), persistance Postgres aux transitions clés (fin de tour, fin de partie, événements notables pour l'historique), et reprise d'état après reconnexion (y compris un `choice_pending` en cours).
   - Done when : un test manuel ou automatisé avec au moins 3 clients WebSocket simultanés (1 Présentateur, 2 Joueurs) sur la même room montre une synchronisation correcte des scores/tours/état des cases en temps réel ; une tentative de jugement de réponse envoyée par un rôle Joueur est rejetée ; une tentative de choix joueur (sélection thème ou Continuer/Coffrer) envoyée par le Présentateur à la place du joueur concerné est rejetée ; une tentative de choix joueur envoyée par le joueur concerné alors que l'état est encore `choice_pending` est rejetée ; une tentative de `choice:reveal` envoyée par un Joueur est rejetée ; un client qui se déconnecte puis se reconnecte reçoit l'état complet et à jour de la room ; une partie terminée crée un enregistrement persistant consultable via les endpoints d'historique.
   - Depends on : Bloc 4.
@@ -170,22 +337,26 @@ Un thème avec `completed == true` (coffré jusqu'à la case 10) doit être non-
   - Done when : une route ou page de démonstration interne rend la palette, l'échelle typographique et les composants de base de façon cohérente avec la DA décrite ; la config Tailwind est commentée/documentée (quelles couleurs/polices utiliser où).
   - Depends on : Bloc 1.
 
-- [x] **Bloc 7 — Écrans frontend + client WebSocket (mode room multi)**
+- [ ] **Bloc 7 — Écrans frontend + client WebSocket (mode room multi)**
+  - État 2026-10-20 : parcours multi fonctionnel confirmé par l'utilisateur, avatars/transfert présents ; bloc rouvert uniquement pour son périmètre complet (banque, statistiques et accès solo) et la fiabilisation du client. Préserver l'affichage du tunnel pendant l'attente Continuer/Coffrer, boutons de choix absents jusqu'à révélation.
   - Déliverable : tous les écrans — Accueil avec le choix "Créer une room multi" (mis en avant) / "Créer une room solo" (secondaire) / rejoindre une room, Lobby (avec la possibilité pour le Présentateur d'y désigner un autre Présentateur), Saisie des thèmes par le Présentateur (manuelle façon "points noirs" + sélection depuis une banque de thèmes prédéfinis), vue Présentateur/régie (boutons de validation Bonne réponse/Mauvaise réponse/Passer, contrôle explicite "Lancer le choix" pour déclencher `choice:reveal`, vue d'ensemble de la room), vue Joueur (sélection de thème à son tour ou choix Continuer/Coffrer une fois révélés, **écran d'attente/suspense neutre** tant que l'état est `choice_pending` — aucune option ni bouton désactivé visible, attente sinon), vue Écran principal (affichage collectif en lecture seule, scores, tunnel en cours), tunnel de jeu animé (pièce maîtresse visuelle), écran de fin de partie avec podium animé et stats de partie — tous branchés au client WebSocket du protocole Bloc 3, avec routage conditionnel par rôle.
   - Done when : un playtest manuel complet sur 4 onglets/navigateurs (1 Présentateur + 2 Joueurs + 1 Écran principal) permet de jouer une partie entière du début à la fin en respectant exactement la spécification figée (y compris vol de progression, coffrage auto en case 10, garde-fou thème complété, délai de révélation via "Lancer le choix" pour la sélection de thème ET pour Continuer/Coffrer) ; chaque écran listé existe et est accessible selon le rôle ; un joueur en attente de révélation du choix Continuer/Coffrer ne voit strictement aucune option, même désactivée ; un joueur en attente de révélation de la sélection de thème voit la grille des thèmes mais ne peut cliquer sur aucun d'eux (voir révision du 2026-10-11 ci-dessus).
   - Depends on : Bloc 5, Bloc 6.
 
 - [ ] **Bloc 7bis — Mode room solo (hotseat mono-écran)**
+  - Priorité 2026-10-20 : différé après consolidation durable du multi. Avant réalisation, soumettre une décision technique sur le partage du moteur Python avec un navigateur local ; ne pas présenter le reducer TypeScript actuel comme un moteur strictement partagé. Conserver les contraintes produit sans code de room ni WebSocket ; si leur respect exige un changement architectural, obtenir un accord explicite avant modification. La persistance solo reste optionnelle et ne bloque pas la persistance multi.
   - Déliverable : écran de création de room solo accessible depuis l'Accueil (Bloc 7), flux hotseat sur un seul navigateur qui bascule manuellement entre la vue Présentateur et la vue du Joueur actif (pas de code de room, pas de connexion WebSocket), en réutilisant tel quel le moteur de règles du Bloc 4 (y compris la couche show `choice_pending`/`choice_open` et le contrôle "Lancer le choix", pertinents même à écran unique pour garder le rythme de jeu télé) et les composants d'écran du Bloc 7 adaptés à une bascule locale de vue plutôt qu'à un flux réseau.
   - Done when : un playtest manuel sur un seul navigateur permet de jouer une partie entière en mode solo du début à la fin (bascule Présentateur ↔ Joueurs, jugement de réponse, choix de thème et Continuer/Coffrer avec délai de révélation via "Lancer le choix"), en respectant exactement la même spécification figée que le mode multi (même barème, même coloration, même coffrage auto case 10) sans qu'aucun code de room ne soit généré ni qu'aucune connexion WebSocket ne soit requise.
   - Depends on : Bloc 4, Bloc 7.
 
 - [ ] **Bloc 8 — Intégration audio**
+  - État 2026-10-20 : implémentation présente (`AudioContext.tsx`, `sounds.ts`, bouton mute et branchements dans les écrans). Reste à valider effets/ambiance et préférences après reload sur navigateurs réels, documenter la synthèse sans assets externes, et préciser quels écrans émettent les sons pour éviter une cacophonie multi-appareils. Les effets actuellement liés aux clics locaux ne prouvent pas une diffusion synchronisée de chaque événement.
   - Déliverable : effets sonores sur bonne réponse, coffrage, tic-tac du chronomètre (paliers de couleur 60s→30s jaune→20s orange→10s rouge clignotant repris de l'original), ambiance musicale de fond discrète cohérente avec la DA jazz club, contrôle de volume/mute persistant côté client (ex. `localStorage`).
   - Done when : chaque effet sonore listé se déclenche sur l'événement correspondant pendant un playtest ; le mute persiste après rechargement de page ; les assets audio utilisés sont committés ou leur source libre de droits est documentée dans le README.
   - Depends on : Bloc 7.
 
-- [x] **Bloc 9 — Packaging déploiement Railway (service unique)**
+- [ ] **Bloc 9 — Packaging déploiement Railway (service unique)**
+  - État 2026-10-20 : Docker/Railway présents, version Railway en déploiement selon l'utilisateur ; bloc rouvert pour satisfaire les critères complets de configuration Postgres/sessions et exploitation durable. Conserver un seul processus applicatif et vérifier le déploiement/restauration via Bloc 14.
   - Déliverable : configuration de build qui produit le bundle React statique et le fait servir par FastAPI (fichiers statiques + fallback SPA), fichier `Procfile` ou configuration Nixpacks adaptée, lecture de `SECRET_KEY`/`DATABASE_URL`/`PORT` depuis l'environnement, bind `0.0.0.0`, `debug` désactivé, endpoint de health check.
   - Done when : un déploiement Railway (ou une simulation locale équivalente type `docker run` avec les mêmes variables d'env) sert à la fois l'API/WS et le frontend buildé depuis un seul process ; aucune valeur sensible ou host/port n'est codée en dur dans le code ; le plugin Postgres Railway peut être branché via `DATABASE_URL` sans modification de code.
   - Depends on : Bloc 5, Bloc 7.
@@ -193,14 +364,63 @@ Un thème avec `completed == true` (coffré jusqu'à la case 10) doit être non-
 - [ ] **Bloc 10 — Tests complémentaires et CI**
   - Déliverable : tests d'intégration WebSocket/API en plus des tests unitaires du Bloc 4, pipeline CI (ex. GitHub Actions) exécutant lint + tests backend + build frontend à chaque push.
   - Done when : la CI échoue si un test de règle de jeu casse ou si le build frontend échoue ; le pipeline est versionné dans le repo. Couverture attendue incluant au moins un scénario d'intégration vérifiant que le moteur de règles du Bloc 4 produit un résultat identique utilisé depuis le mode room multi (Bloc 5) et depuis le mode room solo (Bloc 7bis).
-  - Depends on : Bloc 4, Bloc 5, Bloc 7, Bloc 7bis.
+  - Depends on : première tranche immédiate sur le multi existant (Blocs 4/5/7 et Bloc 12), sans dépendance au solo ; ajouter les tests de parité seulement après Bloc 7bis.
+  - État 2026-10-20 : tests backend présents mais périmés sur certains contrats. La première CI doit exécuter pytest, lint frontend et build TypeScript/Vite à chaque changement, et bloquer une livraison défectueuse. Ajouter ensuite les scénarios de sécurité, reprise et tests frontend ciblés. Ne pas déclarer la suite verte sans exécution.
 
 - [ ] **Bloc 11 — Documentation**
   - Déliverable : README décrivant le setup local (backend + frontend), les variables d'environnement requises (tableau), les étapes de déploiement Railway, et un lien vers `docs/websocket-protocol.md` et `docs/schema.md`.
   - Done when : un nouvel arrivant peut suivre le README pour faire tourner l'app en local et la déployer sur Railway sans information manquante.
   - Depends on : Blocs 1-9, Bloc 7bis.
 
+- [ ] **Bloc 12 — Référence fonctionnelle et réalignement des contrats**
+  - Déliverable : état d'avancement distinguant présent/partiel/validé, protocole à jour et tests adaptés au modèle actuel de participants. Consigner la révision testée et la version Railway de référence sans supposer qu'elles sont identiques.
+  - Done when : tests ne supposent plus `presentateurName` ni des index excluant le Présentateur ; DTO et documentation couvrent `isPresenter`, avatars, transfert et retrait ciblé ; scénario de référence à quatre clients décrit et exécuté (Présentateur, deux Joueurs, Écran principal), résultat consigné.
+  - Depends on : multi existant ; première tranche du Bloc 10 menée avec ce bloc.
+
+- [ ] **Bloc 13 — Sessions, permissions et robustesse du multijoueur**
+  - Déliverable : preuve de session distincte des identifiants publics, autorisations évaluées sur le serveur courant à chaque commande, validation structurée des messages et cycle de connexion cohérent. Limites raisonnables de messages, taille de saisies, rooms inactives et ressources ; protection des fichiers statiques et configuration des origines vérifiées. Fixer des bornes adaptées au petit public sans imposer une architecture distribuée.
+  - Done when : connaître le code de room et tous les identifiants publics ne permet pas d'usurper un participant ; le transfert retire immédiatement les pouvoirs de l'ancien Présentateur et les donne au nouveau sur leurs connexions existantes ; un participant retiré ne récupère pas son accès via un ancien secret ; Rejouer ne donne jamais un tour au Présentateur ; payload non objet, types incorrects et index booléens produisent une erreur contrôlée sans couper arbitrairement la partie. Tester joueur actif absent, tous joueurs absents, perte réseau, doublon de connexion et départ volontaire sans perte involontaire de l'accès de reprise. Consigner le traitement des anciennes sessions et vérifier une partie entière sans régression.
+  - Depends on : Bloc 12 et CI initiale du Bloc 10 ; évolution du protocole Bloc 3 livrée avec les clients/serveur correspondants.
+
+- [ ] **Bloc 14 — Reprise et exploitation durable sur Railway**
+  - Déliverable : restauration des rooms/participants/rôles et états depuis Postgres, reconnexion navigateur avec conservation de la session lors d'une coupure transitoire, procédure de déploiement et de sauvegarde/restauration. Ne jamais sérialiser les sockets ni les verrous ; recalculer la présence réelle au retour des connexions. Définir explicitement le traitement du chrono en cours lors d'un reload/redémarrage (horodatage serveur ou reprise documentée), sans changement implicite des règles de jugement oral.
+  - Done when : sur environnement de test Railway, redéploiement pendant sélection en attente, choix Continuer/Coffrer en attente et question en cours ; les clients retrouvent rôle, scores, progression, tour et sous-phase cohérents. Transaction échouée : aucun changement confirmé ; transaction validée puis diffusion interrompue : la reconnexion retrouve l'état enregistré, sans double attribution de points/statistiques. Restaurer une sauvegarde sur une base séparée et vérifier une partie récupérée. Documenter fréquence/rétention des sauvegardes, perte de données et délai de reprise visés après confirmation ; logs utiles sans secrets et vérification des migrations/health checks. Retour arrière testé vers une version compatible avec le schéma et les sessions.
+  - Depends on : Blocs 2, 5, 13, tranche reprise du Bloc 10 ; complète Blocs 9/11.
+
+- [ ] **Bloc 15 — Historique et profils durables, puis enrichissements**
+  - Déliverable : endpoints et vues d'historique/profil, identité légère durable distincte du pseudo et du secret de session, statistiques de fin de partie calculables à partir des événements. Compléter ensuite banque de thèmes et statistiques finales annoncées, sans réécriture du parcours.
+  - Done when : une partie terminée reste consultable après redémarrage ; deux parties avec le même profil alimentent les statistiques une seule fois chacune ; un changement de pseudo n'efface ni ne fusionne arbitrairement les profils ; un identifiant public seul ne permet pas de réclamer un profil. Règles d'égalité, d'abandon/fin anticipée et définition de meilleur thème/plus gros risque documentées avant calcul. Durée de conservation et suppression opérationnelle documentées. Banque et statistiques finales couvertes par tests ciblés et playtest.
+  - Depends on : Bloc 14 ; complète les périmètres initiaux des Blocs 4/7. Solo reste différé et ne bloque pas ce bloc.
+
+- [ ] **Bloc 16 — Contrat produit et données de la bibliothèque questions/réponses**
+  - Déliverable : préciser avec l'utilisateur le partage de la bibliothèque et ses droits, les opérations de préparation/édition, l'association questions/thème/partie, le nombre requis, l'ordre ou la sélection manuelle, le comportement après mauvaise réponse/reprise d'une case, et le traitement des contenus incomplets. Comparer copie de partie et versions immuables ; formaliser la solution retenue après accord.
+  - Done when : politiques ci-dessus explicitement confirmées, responsabilités bibliothèque/partie/règles documentées et droits définis pour créateur, autre Présentateur, Joueur et Écran principal. Critère invariant : réponses indicatives seulement, sans validation automatique. Pas d'hypothèse arbitraire « une question par case », « bibliothèque commune » ou « chaque Présentateur peut tout éditer ».
+  - Depends on : besoin accepté le 2026-10-20 ; peut être clarifié en parallèle de la consolidation. Ne bloque pas la première version de persistance multi.
+
+- [ ] **Bloc 17 — Bibliothèque persistante de thèmes, questions et réponses indicatives**
+  - Déliverable : modèle/migrations, endpoints et interface de préparation permettant de créer et modifier un thème, saisir ses questions et réponses types, enregistrer, retrouver et réutiliser les contenus indépendamment de la room ; archivage/suppression selon politique du Bloc 16. Validation des tailles/types et autorisations côté serveur.
+  - Done when : un Présentateur prépare des contenus, ferme sa room, recharge le navigateur et retrouve ses contenus avec sa session/profil autorisé ; les contenus persistent après redémarrage et restauration d'une sauvegarde. Tests d'accès croisé entre propriétaires/périmètres selon droits confirmés ; accès refusé aux joueurs et écrans non autorisés. La suppression d'une room ne détruit pas la bibliothèque ; une modification de source ne change pas les contenus déjà figés pour une partie. CI couvre CRUD, intégrité et accès.
+  - Depends on : Bloc 16, schéma Bloc 2, sessions Bloc 13 et exploitation Bloc 14 ; migrations additives, sans bloquer l'étape initiale de sauvegarde multi.
+
+- [ ] **Bloc 18 — Réutilisation en partie et support questions/réponses de la régie**
+  - Déliverable : sélection de thèmes/questions de bibliothèque lors de la préparation et consultation par le Présentateur de l'énoncé et des réponses indicatives pendant le tunnel. Raccordement aux phases existantes question-pending/question sans changer les pouvoirs, le barème ou la validation orale ; conserver les thèmes avec support externe comme chemin de compatibilité.
+  - Done when : deux parties distinctes utilisent les mêmes contenus sans ressaisie ; fin/reset/fermeture de la première ne détruit pas la source. Tests de sélection/reprise après échec selon politique du Bloc 16 et restauration exacte du contexte de question après redéploiement. Inspection des réponses REST et messages WebSocket prouve l'absence de réponses/questions futures dans les flux Joueur/Écran principal ; un changement de rôle retire l'accès privé et ne se contente pas de cacher des boutons (un contenu déjà vu par un ancien Présentateur ne peut toutefois pas être effacé de sa mémoire). Modifier une réponse type ne déclenche jamais un verdict ou une attribution de points. Playtest complet avec questions intégrées, puis vérification du parcours externe historique.
+  - Depends on : Bloc 17 et base multi consolidée (Blocs 5/7/13/14), contrat privé du Bloc 3 et tests du Bloc 10 ; documenter usage et restauration au Bloc 11.
+
 ## Open questions
+
+### Questions actuelles — 2026-10-20
+
+- **Bibliothèque questions/réponses (nouveau besoin)** : personnelle ou partagée, bénéficiaires et droits de modification ; mode de sélection/ordre, nombre de questions nécessaire pour lancer, gestion des questions manquantes et des tentatives après échec ; saisie seulement en préparation ou également en partie. Confirmer copie de partie ou référence à une version immuable avant réalisation. La demande n'autorise pas implicitement l'accès de tous à tous les contenus.
+- Offre Postgres et sauvegardes réellement disponibles sur Railway ; procédure et test de restauration.
+- Rétention des parties/profils, délai de reprise acceptable et perte de données acceptable pour les sauvegardes. La cible des commandes confirmées est leur enregistrement transactionnel ; une sauvegarde périodique a une garantie différente.
+- Mécanisme exact des secrets de session/profil, durée, renouvellement et compatibilité avec les navigateurs déjà connectés ; à trancher au Bloc 13 sans introduire de comptes forts.
+- Politique du chronomètre et de la présence lors d'une reprise ; règles statistiques des fins anticipées/égalités et métriques à finaliser.
+- Architecture du moteur solo à décider avant Bloc 7bis, sans bloquer le multi durable. Sa persistance facultative ne bloque plus la clôture du schéma multi : documenter explicitement son exclusion de cette première version du schéma si retenue.
+
+Le snapshot transactionnel plus journal séparé et la séparation identité publique/secret de session sont actés. Les anciennes propositions d'UUID ci-dessous ne doivent jamais être interprétées comme une autorisation de s'authentifier avec un identifiant diffusé.
+
+### Historique des questions initiales (supplanté par les décisions du 2026-10-20 en cas de conflit)
 
 1. **Granularité de persistance pour la reprise de partie** : l'utilisateur demande de pouvoir "reprendre une partie en cours si possible" sans trancher la mécanique exacte. Proposition par défaut (à valider par le database-architect au Bloc 2, ne bloque pas le démarrage du Bloc 1) : un snapshot complet de l'état courant dans `games.state_json`, mis à jour de façon transactionnelle à chaque action qui modifie l'état, plus un `game_events` append-only séparé pour l'historique/les stats de fin de partie — pas d'event-sourcing complet avec replay. Si cette approche ne convient pas, le confirmer avant de clore le Bloc 2.
 2. **Mécanisme exact de réconciliation d'identité joueur** : l'utilisateur veut un pseudo sans mot de passe avec stats cumulées dans le temps. Proposition par défaut (voir Décision log ci-dessous) : UUID `local_player_id` stocké côté navigateur comme clé réelle des stats, le pseudo restant un simple libellé d'affichage mutable. Limite connue acceptée : si le stockage local est vidé, l'historique de ce joueur n'est plus relié automatiquement (pas de système de réclamation, explicitement hors scope). Si l'utilisateur veut un comportement différent (ex. pseudo globalement unique et verrouillé), le signaler avant de clore le Bloc 2.
@@ -211,6 +431,11 @@ Aucune de ces trois questions ne bloque le démarrage du Bloc 1 ; elles doivent 
 **Confirmation Orion (2026-10-10)** : les propositions par défaut 1 et 2 ci-dessus sont validées telles quelles, pas de remontée nécessaire à l'utilisateur — cohérentes avec les décisions déjà actées (pseudo simple sans mot de passe, persistance pragmatique plutôt qu'event-sourcing complet). La question 3 (persistance du mode solo) est nouvelle suite à l'amendement de ce plan sur les rôles/room et n'a pas encore reçu de confirmation explicite ; sa proposition par défaut est néanmoins raisonnable et n'empêche pas de démarrer le Bloc 1 ou le Bloc 2.
 
 ## Decision log
+
+- **Bibliothèque thèmes/questions/réponses demandée par l'utilisateur (2026-10-20)** : le support annexe actuel doit pouvoir être remplacé à terme par la préparation dans l'application de thèmes, questions associées et réponses types uniquement indicatives. Les contenus persistent après la partie et sont réutilisables dans des parties futures pour constituer progressivement une base. Le jugement reste humain, sans validation automatique. Remplace l'ancienne exclusion des questions/réponses et la description du support externe comme seul fonctionnement possible ; la consolidation durable reste prioritaire. Ajout des Blocs 16–18. Le partage, l'ordre des questions, le traitement des nouvelles tentatives et le choix copie/version restent à confirmer, non présumés acceptés.
+- **Service durable à faible fréquentation — accepté explicitement par l'utilisateur (2026-10-20)** : une version Railway est en déploiement et une partie complète fonctionne ; moins de cinq rooms simultanées attendues. Option 2 acceptée : fiabiliser le multijoueur, ajouter sauvegarde/reprise, puis historique/profils ; différer solo et enrichissements. Préserver le monorepo et un service applicatif/processus unique ; pas de Redis, microservices ni réécriture.
+- **Durabilité et sécurité de session (2026-10-20)** : identifiant public de participant/profil distinct du secret de session ; permissions vérifiées sur l'état serveur courant, y compris après transfert. Snapshot versionné et événements utiles dans une transaction avant publication du nouvel état ; reprise des rooms et reconnexion navigateur nécessaires en plus de Postgres. Sauvegarde et restauration réellement testées avant de déclarer le service durable. Détails de stockage des secrets et objectifs opérationnels restent à préciser dans les blocs correspondants.
+- **Suivi réaliste et ordre de consolidation (2026-10-20)** : blocs 3/4/5/7/9 rouverts car leurs critères complets ne sont pas établis, sans nier le code existant ni le parcours fonctionnel confirmé. Audio présent mais validation restante ; tests backend à réaligner, CI prioritaire sans attendre le solo. Ajout des Blocs 12–15 pour référence, sessions/robustesse, reprise/exploitation et fonctions durables. Les confirmations historiques de tests ne valent pas exécution sur la version inspectée.
 
 - **Granularité de persistance (proposition de planning)** : snapshot transactionnel (`games.state_json`) + log d'événements append-only séparé pour l'historique, plutôt qu'event-sourcing complet. Raison : couvre le besoin exprimé ("reprendre si possible") avec une complexité d'implémentation bien moindre qu'un vrai replay d'événements, tout en gardant un historique exploitable pour les stats de fin de partie. Modifiable si le database-architect ou l'utilisateur identifie un besoin de replay fin.
 - **Identité joueur via `local_player_id`** : UUID client-side comme clé de stats réelle, pseudo comme libellé mutable non unique globalement. Raison : respecte la contrainte "pseudo simple sans mot de passe" sans construire un vrai système de comptes, tout en permettant des stats cumulées cohérentes pour un même navigateur/joueur dans le temps.
