@@ -209,3 +209,11 @@ Pas de backlog dormant ni de map IP illimitée; headers proxy non fiables par
 défaut. L'absence de toute socket authentifiée (écrans inclus) démarre un TTL
 monotone de 86400s, sweep 60s annulé/attendu au shutdown. REST, preauth et preuves
 invalides ne rafraîchissent pas ce TTL; auth à la borne d'expiration échoue.
+
+## Preparation Postgres
+
+La preparation de stockage decrite dans `schema.md` n'est pas branchee aux routes
+ni au manager. Le protocole actif demeure celui du Bloc 13, en memoire. Aucun
+nouveau succes durable, reprise serveur, code d'erreur storage WS ou endpoint de
+readiness n'est revendique. Voir `validation-persistance-postgres.md` avant toute
+activation ; aucun client ne doit rejouer automatiquement une commande ambigue.

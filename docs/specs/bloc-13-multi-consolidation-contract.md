@@ -12,6 +12,8 @@ created: 2026-10-20
 
 Define the requested consolidation boundary for the already playable multiplayer service before persistence work. This is the **reference contract for Bloc 13 consolidation, not a certification of deployment or exhaustive validation**. The supplied pre-consolidation baseline was `c3fdbf6` (66 passing backend tests reported, first milestone committed). The local Bloc 13 delivery and its reported execution evidence are recorded in `docs/validation-bloc-13.md`; that report does not establish a committed or deployed revision. Observed contracts and known gaps come from `docs/websocket-protocol.md`, `docs/validation-jalon-1.md`, `backend/app/api/{rooms,ws}.py`, `backend/app/rooms/manager.py`, the Python engine and the frontend connection/timer components. Preserve complete games for a small Railway group (normally fewer than five rooms); do not rewrite the game.
 
+Bloc 13 defines the pre-persistence consolidation baseline. The draft `postgres-persistence-railway-durability-contract` defines the subsequent target for durable storage, session survival, commit ordering, recovery and archival retention; it does not certify implementation or database validation. During preparation, its explicit persistence changes supersede the historical in-memory lifecycle assumptions below only in the new Postgres code path. Identity, protocol, gameplay and resource protections otherwise remain applicable. Production deployment and durable-validation claims remain gated on real Postgres checks.
+
 ## Behavior
 
 ### Public identity and private session proof

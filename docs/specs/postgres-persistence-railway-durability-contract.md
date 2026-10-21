@@ -1,0 +1,103 @@
+---
+title: "Postgres persistence — Railway durability contract"
+id: postgres-persistence-railway-durability-contract
+type: "technical"
+status: draft
+created: 2026-10-21
+---
+
+# Postgres persistence — Railway durability contract
+
+## Purpose
+
+Define the requested future durability boundary for LeGrandTunneg on Railway, without claiming that it already exists. Baseline HEAD is `2d0e0cb101a6e57a3c5a453dfd127c0f5aa3723b`: `backend/app/rooms/manager.py` still stores rooms/proofs only in process memory, `api/ws.py` mutates before publishing, and `main.py` exposes an unconditional `/health`. This new contract extends, rather than duplicates, [Bloc 13](bloc-13-multi-consolidation-contract.md). It changes that stage's restart/retention boundary only when implemented and validated. The requested plan `reconstruction-le-grand-tunneg` could not be read: this tool session exposes no plan lifecycle reader; plan compatibility remains unverified. This draft records the user's requested future contract, not observed persistence guarantees or deployment approval.
+
+## Behavior
+
+### Durable identity and minimal records
+
+Postgres is the sole production persistence implementation. A room has a stable UUID independent of its public reusable four-character code; each game has a stable UUID. Reset creates a new game UUID and preserves the previous game's archive. Ordinary transitions, reconnect and restart never change either identity. Public participant UUIDs and existing token formats remain unchanged.
+
+The minimal schema contains four record families, with migrations defining concrete columns and constraints:
+
+- `rooms`: room UUID, code, lifecycle status, current game UUID, current revision, UTC creation/closure timestamps and idle deadline. Only live rooms reserve a code and count against `MAX_ROOMS`; live codes are unique.
+- `snapshots`: immutable private snapshots keyed by room UUID and revision, with game UUID and explicit snapshot-format version. Each contains the complete `GameState`, role/name maps including screens, presenter identity, scoped proof digests/session status, and lifecycle/TTL metadata. Preserve player/theme order, scores, history, avatars, nullified squares, actor, rotation anchor, phase and tunnel subphase. Keep previous revisions indefinitely.
+- `sessions`: room/participant-scoped SHA-256 proof digest, role, membership/revocation status and timestamps, consistent with the current snapshot. A removed participant's proof stays revoked; closure revokes all room sessions. Historical digests do not authorize access. No independent sliding session expiry exists.
+- `events`: append-only useful transition records with event UUID, room/game UUIDs, resulting revision, UTC time, kind and relevant actor/target public UUIDs. Command names and bounded nonsecret outcome metadata suffice; do not copy arbitrary request bodies, tokens, digests or full snapshots into events. Heartbeat-only renewals need no event. Events support diagnosis/history, not event-sourced reconstruction.
+
+A dedicated versioned private codec round-trips every durable field and validates types, references, enums and consistency between sessions/snapshot/room revision. `serialize_state` remains a public projection and MUST NOT serve as the persistence codec. Database rows may deliberately duplicate authority data only inside the same atomic revision. Runtime `Room` objects remain caches: never serialize sockets, delivery queues, tasks, locks, monotonic timestamps or connection handles.
+
+### Commit gate and concurrent writes
+
+Every accepted state-changing operation follows this order under the room mutation lock: validate live authority and input; compute an immutable candidate without mutating the installed state; commit one Postgres transaction; install the committed candidate in runtime; enqueue recipient-specific public snapshots. The transaction atomically writes the new private snapshot, session changes, useful event and room pointer/revision. Creation commits before publishing a room, returning its proof or reserving a visible membership. A revision starts at 1; each durable write increments it once.
+
+This gate covers create, new join, rename/avatar/theme/game commands, removal/revocation, presenter transfer, reset, explicit close, expiration and connection eligibility transitions. Pure REST resume validates proof/liveness without membership, presence change or broadcast, as in Bloc 13. A failed gate cannot consume a membership or live-room slot. Close/expiration commit closure and all revocations before terminal notifications and live-cache removal; they preserve snapshots, sessions and events indefinitely. Archive growth never counts as live-room capacity.
+
+Every write supplies the expected revision and updates the room only if it still matches. A unique room/revision constraint and conditional revision update detect double writing even in the supported single process. OCC conflict rejects the candidate and blocks that room pending authoritative readback; it never overwrites or automatically retries a command. One worker/replica remains the only supported topology; OCC does not implement distributed socket authority.
+
+A confirmed rollback or failure before COMMIT submission leaves the installed game/session state unchanged, sends no success and publishes no candidate. REST returns 503 with `detail: {code: "persistence_unavailable", message: "Room persistence unavailable."}`; authenticated WS commands receive the same code/message in `error`. Keep existing validation/auth errors when persistence is not the cause. Never return a generated secret for a failed creation/join.
+
+Lost connection, cancellation or timeout after COMMIT submission can leave the result unknown. Mark the room blocked before another operation, return no success, and use `persistence_unavailable` for the caller; a failed create also blocks reuse of its pending code until resolved. Perform at most one immediate bounded readback using the candidate revision and a persisted unique internal transition/event UUID (heartbeat writes use an internal write UUID). A matching complete revision means committed: install it and publish only after verification. An unchanged previous revision means not committed only after Postgres has resolved the original transaction; otherwise keep the outcome unknown. A divergent revision also stays blocked. Readback timeout never implies rollback. Later explicit reconciliation or startup restoration can resolve the block; never replay the command automatically. This internal write identity is not a client command ID: no exactly-once guarantee exists, and a client must not blindly resubmit an ambiguous action.
+
+### Runtime connections and recovery
+
+Startup checks connectivity, migration revision and private-format compatibility, then restores all live rooms before admitting REST memberships/resume or WS auth/commands. Reject corrupt/inconsistent snapshots or unsupported versions; do not silently discard a room or recreate an empty lobby. Recreate runtime locks/delivery resources. Validate that restored live capacity fits configured limits; fail startup rather than drop rooms.
+
+Treat all restored participants as disconnected, regardless of saved presence. Apply this normalization as a committed recovery revision before readiness when it changes durable state. Preserve the current actor/index, active theme, history, scores and exact subphase; a previously ready active turn becomes `active-absent`. Preserve `waiting-eligible` and its rotation anchor. Do not call `engine.start_game`, reset, draw a new actor or adjudicate a timer during restore. The same durable proof authenticates the same participant after restart; the first successful eligible return follows Bloc 13's suspension/rotation rules through the commit gate.
+
+Authenticated attachment that changes presence/eligibility commits before installing authority or sending the first state sync. Last successful authentication still wins; failure leaves the former socket authoritative. Replacement invalidates the old socket before any terminal network delivery and never emits an artificial absent interval. Continue checking exact socket identity, current role and proof under the lock. Old-socket commands, disconnects and send failures cannot affect its replacement.
+
+Physical disconnect must release socket authority/resources immediately, even with Postgres down. Maintain a bounded runtime presence overlay keyed only by existing participants and exact active socket identity; absent transport overrides saved `connected=true` for authorization/eligibility. It never advances the durable game. Attempt a commit-gated absence/suspension revision; if persistence fails, retain the overlay, block further gameplay/attachments in that room and reconcile before resuming. The same rule applies to disconnect during an in-flight commit: record transport loss without waiting for network/DB completion and reconcile it before another command. Do not broadcast an uncommitted actor change, rotation or other game progression. A physical transport failure is not durable revocation.
+
+Publishing follows commit order per socket; coalescing to the latest committed snapshot remains allowed. Sends/closes stay outside the mutation lock, with Bloc 13's bounded per-recipient delivery and identity-safe cleanup. No DB outage authorizes a stale socket, a new membership or in-memory-only gameplay.
+
+### Inactivity, crash and indefinite retention
+
+TTL controls admission/liveness, not deletion of business records. Keep `ROOM_IDLE_TTL_SECONDS=86400` and cleanup interval 60 seconds. In a healthy running process, preserve Bloc 13: creation starts the idle period; any authenticated socket, including a screen, prevents idle expiration; loss of the last socket starts a fresh 24-hour interval. REST-only traffic, rejected proofs and preauth traffic do not refresh it. This deliberately preserves the existing policy rather than extending it to every REST activity.
+
+Persist an absolute `idle_deadline_utc` and last durable liveness signal in UTC. Creation sets deadline to creation time plus TTL. Successful socket authentication, durable activity while sockets are authenticated, and a once-per-60-second per-room lifecycle heartbeat with at least one authenticated socket set deadline to the signal time plus TTL in the same transaction. There is no per-message heartbeat write. Confirmed last detach sets deadline to detach time plus TTL. A failed detach write leaves the last durable deadline authoritative for crash recovery; do not fabricate a later signal.
+
+While running, use monotonic elapsed time for the idle interval and heartbeat schedule. Convert a restored UTC deadline once into a remaining monotonic interval; never persist or compare monotonic values across processes. UTC clocks must be reasonably synchronized; this is not protection against arbitrary wall-clock manipulation. A room with authenticated sockets requires successful heartbeat renewal; if renewal cannot commit, stop admissions/game progression and mark readiness false, rather than run indefinitely on stale liveness.
+
+After a crash all sockets are absent. Use the saved UTC deadline unchanged: no new 24 hours at startup, no expiration based solely on process restart. If now is at/after the deadline, commit expiration/revocation before readiness and deny access even before the next sweep. Otherwise preserve the remaining interval until new authentication or expiration. A crash with sockets therefore gives a conservative 24 hours from the last durable signal, usually up to 60 seconds less than 24 hours from crash; a brief restart does not revoke a recently active room. Downtime exceeding that deadline expires it. During DB failure, deny access to expired rooms even when archival closure cannot commit; reconcile closure before further use. Closed/expired rooms cannot reopen through proof authentication.
+
+### Startup, settings, migrations and health
+
+The normal application entrypoint requires a valid Postgres `DATABASE_URL`; `APP_ENV=development` does not select another store. Missing/invalid URL, database unavailable, unknown/unapplied migration revision, unsupported snapshot or failed restoration fails startup without an empty-memory fallback. An actually empty, validated Postgres database can start normally. Mask the complete URL and credentials in configuration/errors/logs; disable SQL parameter and proof-bearing payload logging.
+
+Use bounded validated settings: `DB_POOL_SIZE=5`, `DB_MAX_OVERFLOW=0`, `DB_POOL_TIMEOUT_SECONDS=5`, `DB_CONNECT_TIMEOUT_SECONDS=5`, `DB_COMMAND_TIMEOUT_SECONDS=5`, `DB_TRANSACTION_TIMEOUT_SECONDS=10`, `DB_RECONCILE_TIMEOUT_SECONDS=10`. Pool size and timeouts must be positive finite values (pool size an integer); overflow is a nonnegative integer. The transaction deadline bounds the whole transaction including COMMIT; timeout after COMMIT submission follows the unknown-outcome rule. Apply command/transaction deadlines to restore, cleanup and heartbeat too; no unbounded pool queue, retries or DB tasks. Restore/reconciliation may take several individually bounded operations; no admission occurs during them.
+
+Transport policy is explicit: `DB_TLS_MODE=verify-full` is the default, using system certificate authorities and hostname verification. The explicit `private-network` exception permits plaintext only for accepted hostnames under `.railway.internal`; this hostname guard does not prove membership of Railway's private network. The application store and online migrations use the same policy, without automatic TLS downgrade.
+
+`DB_CLEANUP_TIMEOUT_SECONDS=2` is a positive finite additional cleanup budget, at most 10 seconds. A single cleanup budget covers rollback and connection release and is not renewed by repeated cancellation. By default an operation allows 10 seconds for its transaction plus up to 2 seconds for cleanup, excluding event-loop scheduling and synchronous work; this is not a real-time guarantee. Failed or timed-out cleanup detaches and terminates the connection. Cleanup failure after COMMIT confirmation is classified conservatively as `CommitUnknown`, without replay; reconciliation remains required.
+
+`GET /health` remains process liveness, with no durability claim. Add reserved `GET /health/ready`: 200 only after schema/restore validation, successful bounded DB check and no unresolved persistence block/heartbeat failure; otherwise 503 with a nonsecret status. Reserve it from SPA fallback. Configure Railway admission/health checking against readiness before deploying persistence; the baseline's `/health` check alone is insufficient. Readiness never permits bypassing per-operation gates.
+
+Migrations use explicit `alembic upgrade head`, run against the configured Postgres database before application startup, not an implicit startup migration. Initial migrations are additive. Startup accepts only the migration head supported by the running code and known private snapshot versions. A code rollback requires compatibility with the existing schema/snapshots or stops; never run a destructive downgrade to make old code start. No destructive archive cleanup accompanies a deploy. Railway-native backups are an optional infrastructure setting, not an application guarantee; no external backup service or HA is required for this low-importance service.
+
+## Constraints
+
+- This draft's persistence is future work; baseline code preparation and spec validation do not establish validated durability. Before real DB validation the future persistence service remains non-deployable.
+- Exactly one production store: Postgres intended for future Railway deployment. No replacement/local database, Compose, SQLite, new memory backend, config-selectable test backend or fallback. Existing runtime caches are not a storage implementation.
+- Unit tests inject a strict fake repository directly into the manager. Fake implementations/fixtures exist only in test material, check revision/atomicity/failure paths and are never selectable through application configuration or production entrypoints.
+- Postgres integration tests explicitly skip, with a visible reason, when `TEST_DATABASE_URL` is absent; never substitute a fake and label it network/database evidence. Do not provision another database to avoid deferral.
+- Offline migration SQL generation, codec round trips and unit tests can run before Railway provisioning. Real Postgres transactions/OCC, network failures and ambiguous COMMIT, pool limits, migrations against Postgres, process restart/restoration and backup restoration remain NOT RUN until actually executed and recorded. This spec records no test execution.
+- Retain business snapshots, useful events and revoked-session archives indefinitely, including after room close/reset/expiration. No retention purge, external backup/HA SLA, or guarantee against loss of the Postgres service itself exists.
+- Tokens remain 32-byte random base64url proofs; store only digests. No raw proof in DB, events, public state, URLs, logs, error text or migration fixtures. Private snapshots/digests never enter public `room:state_sync`.
+- Preserve scoring, phase/role rules, manual adjudication, suspension semantics and the existing local indicative 60-second countdown. No durable/authoritative remaining-time clock, profiles, statistics, solo/hotseat or question/theme/QR library policy enters this schema.
+
+## Examples
+
+At revision 17 Alice is the actor in `tunnel/question`. `answer:good` computes revision 18. A confirmed rollback retains revision 17, points, sessions and runtime authority and returns `persistence_unavailable`; no revision-18 state sync appears. A lost COMMIT response blocks the room. Readback finding the matching revision-18 write identity installs it; the server does not score the answer a second time.
+
+At `2026-10-21T12:00:00Z` a connected room commits a heartbeat and deadline `2026-10-22T12:00:00Z`; the process crashes at 12:00:20. Restart at 12:02 restores the same actor/subphase as `active-absent`, all participants absent, and the unchanged deadline. Alice authenticates with the same proof: her ready-state revision commits before the first state sync. Restart instead at `2026-10-22T12:00:00Z` expires/revokes the room, retains its archive and consumes no live slot.
+
+After Bob's socket B replaces A, A's delayed disconnect makes no presence write. If B then disconnects while Postgres is unavailable, its physical authority disappears immediately; the overlay prevents Bob from being considered eligible, but no new actor or scoring transition is announced. Readiness is false until durable absence/reconciliation succeeds.
+
+## Rationale
+
+Bloc 13 requires amendments when persistence becomes operational, not an unannounced reinterpretation of its active in-memory contract. Its exact excerpts requiring change are: “Sessions live for the room's in-memory lifetime”; “Closure/expiry first marks the room closed and invalidates all authority, then performs notifications and deletion”; “In-memory rooms/sessions still disappear on restart”; “This stage uses one process and one authoritative in-memory room manager. Multiple workers/replicas and restart survival are unsupported”; and “Each sweep revokes/deletes expired rooms”. Replace those guarantees with durable session lifetime, commit-gated closure, live-cache removal without archive deletion, and startup restoration. Amend “Rejects never mutate game/session/presence state” to distinguish physical transport absence/overlay from rejected durable mutations. Amend the TTL paragraph with the persisted deadline/heartbeat crash rule; retain its healthy-process connection-based inactivity policy. Remove Postgres/durable sessions from Bloc 13's non-goals only for the persistence stage. The current stage remains accurately described until that coordinated update; this draft does not modify it or the reconstruction plan.
+
+## Non-goals
+
+No implementation, plan edit, migration execution, database provisioning, deployment, destructive downgrade or remote configuration change accompanies this document. No multi-worker support, client command replay/exactly-once protocol, public archive browsing, accounts/profiles/statistics, library/QR decisions, scoring changes or synchronized timer is implied.

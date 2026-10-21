@@ -20,6 +20,8 @@ COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/app ./app
+COPY backend/alembic.ini ./alembic.ini
+COPY backend/migrations ./migrations
 
 # Le frontend buildé est copié dans app/static : main.py le sert en fallback
 # SPA (voir backend/app/main.py, section "Service du frontend statique").

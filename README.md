@@ -74,6 +74,44 @@ les parties en cours.
 
 ## Validation et CI
 
+### Preparation Postgres (Non Activable)
+
+Le codec prive, le repository asyncpg/SQLAlchemy et une migration additive sont
+prepares, **mais ne sont pas branches au manager**. Le serveur reste la baseline
+memoire du Bloc 13, sans reprise apres redemarrage. Cette tranche n'est PAS
+deployable comme service persistant ; aucune base de remplacement n'est prevue.
+Voir [schema](docs/schema.md) et [limites et preuves](docs/validation-persistance-postgres.md).
+
+Depuis `backend`, `python -m alembic upgrade head --sql` compile le SQL sans base.
+Quand la future base dediee sera disponible et l'orchestration terminee, la
+commande pre-deploy explicite sera `python -m alembic upgrade head` avec
+`DATABASE_URL` injectee par l'environnement. Elle n'est jamais lancee implicitement
+par le serveur. Le Dockerfile embarque les migrations. Ne pas activer cette
+preparation sur Railway ; conserver un seul worker/replica et terminer readiness,
+restauration et tests reels avant activation. Aucun downgrade destructif pour
+revenir a un ancien binaire : rollback uniquement vers du code compatible valide.
+
+Le repository et Alembic online utilisent `DB_TLS_MODE=verify-full` par defaut
+(certificat et hostname verifies via les CA systeme). Aucun fallback/downgrade TLS.
+Si la future DB Railway privee ne supporte pas TLS, choisir explicitement
+`DB_TLS_MODE=private-network` : plaintext autorise uniquement avec un hostname
+`*.railway.internal`, jamais une URL publique. Ne pas utiliser ce mode hors du
+reseau prive Railway. Aucun certificat/secret reel n'est versionne.
+`DB_CLEANUP_TIMEOUT_SECONDS=2` (maximum 10) ajoute un budget de nettoyage au
+delai transactionnel/readback : rollback puis fermeture ; a expiration, transport
+termine et connexion detachee du pool. Valeurs par defaut : ecriture/lecture
+10 + 2 secondes, hors ordonnancement de l'event loop. Une ecriture dont COMMIT
+a ete soumis reste `CommitUnknown` en cas d'echec, sans retry automatique.
+
+Les tests opt-in exigent `TEST_DATABASE_URL` distincte de `DATABASE_URL`, une base
+dediee dont le nom finit par `_test`, et
+`TEST_DATABASE_ACK=dedicated-disposable-database`. Migrer explicitement cette base
+de test via `DATABASE_URL="$TEST_DATABASE_URL" python -m alembic upgrade head`
+avant `python -m pytest -q tests/test_postgres_optin.py -rs`. Ils conservent leurs
+archives, sans DROP/TRUNCATE/purge. Ne jamais utiliser une base contenant des
+donnees utiles. En l'absence d'URL les tests sont explicitement ignores ; aucune
+base locale/Compose/SQLite/service CI n'est creee. La CI compile seulement le SQL.
+
 Depuis la racine, avec les dépendances installées :
 
 ```bash
