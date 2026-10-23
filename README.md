@@ -68,24 +68,29 @@ profil. La dernière socket authentifiée gagne; l'autre onglet n'essaie pas de
 reprendre automatiquement la main. Utiliser des profils isolés, pas seulement
 plusieurs onglets.
 
-⚠️ L'état des rooms est actuellement en mémoire uniquement (pas de
-persistance Postgres, voir Bloc 2) : un redémarrage du backend efface toutes
-les parties en cours.
+Postgres est obligatoire au demarrage, y compris en developpement. Aucun mode
+memoire, SQLite ou base de remplacement automatique. Les migrations sont une
+operation explicite autorisee avant le lancement, jamais une action du serveur.
+Le raccordement est en revue et les preuves sur vraie base restent differees :
+ne pas deployer cette revision avant validation.
 
 ## Validation et CI
 
-### Preparation Postgres (Non Activable)
+### Raccordement Postgres (En Revue)
 
-Le codec prive, le repository asyncpg/SQLAlchemy et une migration additive sont
-prepares, **mais ne sont pas branches au manager**. Le serveur reste la baseline
-memoire du Bloc 13, sans reprise apres redemarrage. Cette tranche n'est PAS
-deployable comme service persistant ; aucune base de remplacement n'est prevue.
+Le manager, REST, WS et le startup utilisent le repository asyncpg/SQLAlchemy.
+Chaque mutation prepare un candidat prive puis commit avant installation et
+publication. Le startup verifie le schema, restaure et normalise les presences
+avant admission. Cette tranche n'est PAS encore validee sur vraie base ni
+deployee ; aucune base de remplacement n'est prevue.
 Voir [schema](docs/schema.md) et [limites et preuves](docs/validation-persistance-postgres.md).
 
 Depuis `backend`, `python -m alembic upgrade head --sql` compile le SQL sans base.
 Quand la future base dediee sera disponible et l'orchestration terminee, la
 commande pre-deploy explicite sera `python -m alembic upgrade head` avec
-`DATABASE_URL` injectee par l'environnement. Elle n'est jamais lancee implicitement
+`DATABASE_PRIVATE_URL` (prioritaire) ou `DATABASE_URL` injectee par l'environnement.
+Une variable privee presente mais invalide ne bascule jamais sur l'autre URL.
+Cette priorite vaut pour le serveur ET les migrations. La commande n'est jamais lancee implicitement
 par le serveur. Le Dockerfile embarque les migrations. Ne pas activer cette
 preparation sur Railway ; conserver un seul worker/replica et terminer readiness,
 restauration et tests reels avant activation. Aucun downgrade destructif pour
@@ -103,10 +108,10 @@ termine et connexion detachee du pool. Valeurs par defaut : ecriture/lecture
 10 + 2 secondes, hors ordonnancement de l'event loop. Une ecriture dont COMMIT
 a ete soumis reste `CommitUnknown` en cas d'echec, sans retry automatique.
 
-Les tests opt-in exigent `TEST_DATABASE_URL` distincte de `DATABASE_URL`, une base
+Les tests opt-in exigent `TEST_DATABASE_URL` distincte des deux URLs applicatives, une base
 dediee dont le nom finit par `_test`, et
 `TEST_DATABASE_ACK=dedicated-disposable-database`. Migrer explicitement cette base
-de test via `DATABASE_URL="$TEST_DATABASE_URL" python -m alembic upgrade head`
+de test via `DATABASE_PRIVATE_URL="$TEST_DATABASE_URL" python -m alembic upgrade head`
 avant `python -m pytest -q tests/test_postgres_optin.py -rs`. Ils conservent leurs
 archives, sans DROP/TRUNCATE/purge. Ne jamais utiliser une base contenant des
 donnees utiles. En l'absence d'URL les tests sont explicitement ignores ; aucune
@@ -152,11 +157,15 @@ buildé et sert tout via `uvicorn`).
 | `PORT` | Non (Railway la fournit) | `8000` | Port lu par `python -m app.serve`. |
 | `APP_ENV` | Oui en production | `development` | Utiliser `production`; configuration invalide bloque le démarrage. |
 | `ALLOWED_ORIGINS` | Oui en production | `http://localhost:5173,http://127.0.0.1:5173` en dev | Origines exactes CORS **et WS**, liste HTTPS explicite en production, sans chemin ni wildcard. Même host n'est pas une exemption. |
+| `DATABASE_PRIVATE_URL` | Une URL Postgres requise | Aucun | Prioritaire si presente, sans fallback si invalide. N'implique aucun choix TLS. |
+| `DATABASE_URL` | Compatibilite | Aucun | Utilisee uniquement si `DATABASE_PRIVATE_URL` est absente. |
+| `DB_TLS_MODE` | Non | `verify-full` | `private-network` exige un choix explicite et un hostname `*.railway.internal`. |
 
 Le point d'entrée `python -m app.serve` applique `MAX_MESSAGE_BYTES` à Uvicorn
 avant décodage JSON et borne sa queue de transport. Ne pas le remplacer par un
 `uvicorn app.main:app` nu qui perdrait ces paramètres. Un seul worker/réplica;
-rooms, secrets hachés, quotas et verrous restent process-local. Les métadonnées
+quotas, verrous et sockets restent process-local, les rooms et preuves hachees
+etant archives dans Postgres. Les métadonnées
 forwarded/proxy ne sont pas fiables par défaut; les quotas sont globaux et ne
 dépendent pas d'une IP annoncée par le client.
 
@@ -171,6 +180,7 @@ excéder le TTL.
 | `MAX_NAME_CHARS` / `MAX_THEME_LABEL_CHARS` | `24` / `100` |
 | `MAX_MESSAGE_BYTES` / `MAX_REST_BODY_BYTES` | `8192` / `8192` |
 | `REST_BODY_TIMEOUT_SECONDS` / `MAX_REST_BODY_READERS` | `5` / `32` |
+| `REST_OPERATION_TIMEOUT_SECONDS` / `MAX_REST_OPERATIONS` | `15` / `32` |
 | `AUTH_TIMEOUT_SECONDS` / `SEND_TIMEOUT_SECONDS` | `5` / `2` |
 | `MAX_PREAUTH_CONNECTIONS` / `MAX_AUTHENTICATED_CONNECTIONS` | `32` / `200` |
 | `ROOM_IDLE_TTL_SECONDS` / `ROOM_CLEANUP_INTERVAL_SECONDS` | `86400` / `60` |
@@ -178,6 +188,31 @@ excéder le TTL.
 | `WS_UPGRADE_RATE_PER_SECOND` / `WS_UPGRADE_RATE_BURST` | `10` / `20` |
 | `WS_COMMAND_RATE_PER_SECOND` / `WS_COMMAND_RATE_BURST` | `20` / `40` |
 | `WS_GLOBAL_RATE_PER_SECOND` / `WS_GLOBAL_RATE_BURST` | `200` / `400` |
+
+L'admission REST est globale au processus pour create/join/resume : 32 operations
+maximum, corps + attente du verrou + persistance compris, sans queue d'admission.
+Saturation : 503 no-store. Le delai de 15s declenche l'annulation ; la resolution
+COMMIT/nettoyage peut ajouter ses budgets DB bornes, sans liberer le slot avant
+leur fin. La creation n'attend plus un sweep ecrivant toutes les rooms ;
+l'expiration reste verifiee sous verrou avant tout acces a une room.
+Un unique lecteur WS independant du traitement DB garde au maximum
+`WS_COMMAND_RATE_BURST` messages valides/invalides decodes ; saturation ferme en
+4429, sans backlog illimite. Il retire l'autorite physique au disconnect sans
+attendre le verrou. Les auth en attente reservent une place globale avant write ;
+les anciennes sockets remplacees comptent jusqu'a leur nettoyage.
+L'overflow WS conserve l'erreur ciblee `rate_limited` et une unique fermeture
+4429 meme si un commit ou son nettoyage est en cours, sans 1013 concurrent.
+Une adhesion REST confirmee conserve sa reponse 200 et sa preuve si la correction
+de presence d'un autre transport echoue : `state: null`,
+`persistenceUnavailable: true`, room bloquee sans publication incoherente.
+Conserver cette identite pour la reprise ; ne pas recommencer une adhesion.
+La preuve est rendue lorsque le transport HTTP permet la reponse, sans garantie
+exactly-once HTTP. Le client affiche l'indisponibilite du recu et des erreurs
+stockage WS pre-auth/1013, conserve l'identite apres reload et propose Reprendre
+avec la meme preuve ; seul le sync WS authentifie ouvre le jeu.
+Readiness : un seul check simultane par processus, sans queue ni nouveau setting,
+budget 2s plus nettoyage DB borne si necessaire ; saturation 503 sanitise no-store.
+Aucun check DB quand une room est deja indisponible ; succes aussi no-store.
 
 Les lectures create/join/reprise partagent au plus 32 places par process, sans
 file d'attente. La lecture du corps a une deadline absolue de 5 secondes, non
@@ -187,8 +222,8 @@ REST reste distinct (HTTP 429). Ces bornes sont appliquées par l'application,
 sans hypothèse sur un timeout du proxy Railway.
 
 Le TTL commence sans socket authentifiée (écrans compris); REST et preuves
-incorrectes ne le prolongent pas. Aucune persistance après restart. Les valeurs
-`DATABASE_URL` et `SECRET_KEY` ne fournissent ici ni sauvegarde ni comptes.
+incorrectes ne le prolongent pas. Apres restart, la deadline UTC durable reste
+inchangee ; Postgres conserve les archives, sans garantie de backup externe ni comptes.
 
 L'identité v2 contient une preuve bearer dans localStorage : tout JavaScript
 same-origin compromis peut la voler. Ne pas enregistrer les corps create/join

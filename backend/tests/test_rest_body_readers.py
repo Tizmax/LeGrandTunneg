@@ -10,7 +10,9 @@ from starlette.requests import ClientDisconnect, Request
 from app.api import rooms
 from app.core.limits import TokenBucket
 from app.core.settings import settings
-from app.main import app
+from tests.persistence_double import transport_app
+
+app = transport_app()
 
 
 @pytest.fixture(autouse=True)

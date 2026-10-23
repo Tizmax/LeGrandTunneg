@@ -59,7 +59,9 @@ class DatabaseConfig:
     def from_environment(cls):
         try:
             return cls(
-                url=os.environ.get("DATABASE_URL", ""),
+                # An explicitly configured private URL wins, even when invalid.
+                # Never silently switch databases after a configuration error.
+                url=os.environ.get("DATABASE_PRIVATE_URL", os.environ.get("DATABASE_URL", "")),
                 pool_size=int(os.environ.get("DB_POOL_SIZE", "5")),
                 max_overflow=int(os.environ.get("DB_MAX_OVERFLOW", "0")),
                 tls_mode=os.environ.get("DB_TLS_MODE", "verify-full"),

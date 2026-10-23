@@ -1,4 +1,4 @@
-"""Local real HTTP/WS transport evidence, not a browser or Railway claim."""
+"""Real HTTP/WS transport with an injected double, not a Postgres/Railway proof."""
 
 import asyncio
 import json
@@ -36,7 +36,8 @@ def live_service():
         "WS_GLOBAL_RATE_BURST": "1000",
     }
     process = subprocess.Popen(
-        [os.sys.executable, "-m", "app.serve"],
+        [os.sys.executable, "-m", "uvicorn", "tests.persistence_double:transport_app", "--factory",
+         "--host", "127.0.0.1", "--port", str(port), "--ws-max-size", "8192"],
         cwd=Path(__file__).resolve().parents[1], env=env,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )

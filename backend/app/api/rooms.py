@@ -5,7 +5,7 @@ import json
 import re
 import uuid
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.core.limits import TokenBucket
@@ -13,10 +13,28 @@ from app.core.settings import settings
 from app.game import engine
 from app.game.serialize import serialize_state
 from app.rooms.manager import CapacityError, RoomNotFoundError, UnknownParticipantError, room_manager
+from app.persistence.store import PersistenceUnavailable
 
-router = APIRouter(prefix="/api/rooms", tags=["rooms"])
 rest_bucket = TokenBucket(settings.rest_rate_per_second, settings.rest_rate_burst)
 body_readers = 0
+operations = 0
+
+
+async def admission():
+    global operations
+    if operations >= settings.max_rest_operations:
+        fail(503, "capacity_exceeded", "Request capacity exceeded.")
+    operations += 1
+    try:
+        async with asyncio.timeout(settings.rest_operation_timeout_seconds):
+            yield
+    except TimeoutError:
+        fail(503, PersistenceUnavailable.code, PersistenceUnavailable.message)
+    finally:
+        operations -= 1
+
+
+router = APIRouter(prefix="/api/rooms", tags=["rooms"], dependencies=[Depends(admission)])
 
 
 def valid_proof(payload: dict) -> bool:
@@ -82,9 +100,10 @@ async def create_room(request: Request) -> JSONResponse:
     if set(payload) != {"pseudo"}:
         fail(422, "invalid_payload", "Invalid payload.")
     pseudo = name(payload["pseudo"])
-    await room_manager.cleanup_once()
     try:
-        room, pid, token = room_manager.create_room(pseudo)
+        room, pid, token = await room_manager.create_room(pseudo)
+    except PersistenceUnavailable:
+        fail(503, PersistenceUnavailable.code, PersistenceUnavailable.message)
     except CapacityError:
         fail(503, "capacity_exceeded", "Room capacity exceeded.")
     return JSONResponse({"code": room.code, "localPlayerId": pid, "role": "presentateur",
@@ -107,20 +126,27 @@ async def join_room(code: str, request: Request) -> JSONResponse:
     try:
         room = room_manager.get_room(code)
         async with room.lock:
-            room_manager.ensure_live(room)
+            await room_manager.ensure_live(room)
             if resume:
                 pid = payload["localPlayerId"]
                 room_manager.verify(room, pid, payload["sessionToken"])
                 token = None
             else:
-                pid, token = room_manager.join_room_locked(room, payload["pseudo"], payload.get("role", "joueur"))
+                pid, token = await room_manager.join_room_locked(room, payload["pseudo"], payload.get("role", "joueur"))
                 room_manager.publish_locked(room)
+            unavailable = bool(room.absent or room.blocked)
+            if unavailable and resume:
+                raise PersistenceUnavailable()
             result = {"code": room.code, "localPlayerId": pid, "role": room.roles[pid],
-                      "state": serialize_state(room.state)}
+                      "state": None if unavailable else serialize_state(room.state)}
+            if unavailable:
+                result["persistenceUnavailable"] = True
             if token:
                 result["sessionToken"] = token
     except RoomNotFoundError:
         fail(404, "room_not_found", "Room not found.")
+    except PersistenceUnavailable:
+        fail(503, PersistenceUnavailable.code, PersistenceUnavailable.message)
     except UnknownParticipantError:
         fail(401, "session_revoked", "Session unavailable.")
     except CapacityError:

@@ -24,7 +24,8 @@ from starlette.websockets import WebSocketDisconnect
 from app.api import rooms, ws
 from app.core.limits import TokenBucket
 from app.core.settings import settings
-from app.main import app
+from app.main import create_app
+from tests.persistence_double import StrictStore
 from app.rooms.manager import room_manager
 
 
@@ -40,7 +41,7 @@ def client(monkeypatch):
     monkeypatch.setattr(rooms, "rest_bucket", TokenBucket(10000, 10000))
     monkeypatch.setattr(ws, "upgrade_bucket", TokenBucket(10000, 10000))
     monkeypatch.setattr(ws, "global_bucket", TokenBucket(10000, 10000))
-    with TestClient(app) as test_client:
+    with TestClient(create_app(store=StrictStore())) as test_client:
         yield test_client
 
 

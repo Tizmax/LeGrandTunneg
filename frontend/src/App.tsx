@@ -79,11 +79,13 @@ function shouldShowControls(phase: string): boolean {
 }
 
 /** Écran neutre pendant la connexion/reconnexion WebSocket. */
-function ConnectingScreen() {
+function ConnectingScreen({ error, resume }: { error?: string; resume: () => void }) {
   return (
     <ScreenShell spotlight smoke>
       <div className="flex flex-1 flex-col items-center justify-center gap-4">
         <p className="text-xs tracking-[0.3em] text-[#9a8d7d] uppercase">Connexion à la room…</p>
+        {error && <p role="status" className="max-w-lg px-4 text-center text-sm text-amber-glow">{error}</p>}
+        {error && <Button variant="gold" onClick={resume}>Reprendre la session</Button>}
       </div>
     </ScreenShell>
   )
@@ -121,17 +123,17 @@ function App() {
 function AppConnected() {
   // Keep the private identity stable during transport recovery; only explicit
   // create/join or forgetting a session replaces this controller's identity.
-  const [session, setSession] = useState<{ identity: Identity | null; connectError: string | null }>(
+  const [session, setSession] = useState<{ identity: Identity | null; connectError: string | null; persistenceUnavailable?: boolean }>(
     () => ({ identity: loadStoredIdentity(), connectError: hasLegacyIdentity()
       ? 'Ancienne session sans preuve privée. Rejoignez explicitement une room pour continuer.' : null }),
   )
   const { identity, connectError } = session
 
-  const connection = useRoomConnection(identity)
+  const connection = useRoomConnection(identity, session.persistenceUnavailable)
 
-  const handleConnected = useCallback((newIdentity: Identity) => {
+  const handleConnected = useCallback((newIdentity: Identity, persistenceUnavailable = false) => {
     storeIdentity(newIdentity)
-    setSession({ identity: newIdentity, connectError: null })
+    setSession({ identity: newIdentity, connectError: null, persistenceUnavailable })
   }, [])
 
   // ── Ambiance jazz : gérée au niveau de l'App pour persister entre phases ──
@@ -182,7 +184,7 @@ function AppConnected() {
   if (connection.status !== 'open' || !connection.role) {
     return (
       <div>
-        <ConnectingScreen />
+        <ConnectingScreen error={connection.lastError?.message} resume={connection.resume} />
         <button className="fixed bottom-6 left-1/2 -translate-x-1/2 text-sm text-amber-glow" onClick={connection.disconnect}>
           Arrêter la reconnexion
         </button>

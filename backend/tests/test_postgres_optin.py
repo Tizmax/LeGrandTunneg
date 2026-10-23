@@ -20,11 +20,12 @@ def dedicated_database():
         pytest.skip("TEST_DATABASE_URL absent: real Postgres validation deferred; no substitute database.")
     try:
         parsed = make_url(url)
-        production = os.environ.get("DATABASE_URL")
         same_database = False
-        if production:
+        for production in (os.environ.get("DATABASE_PRIVATE_URL"), os.environ.get("DATABASE_URL")):
+            if not production:
+                continue
             deployed = make_url(production)
-            same_database = (parsed.host, parsed.port or 5432, parsed.database) == (
+            same_database |= (parsed.host, parsed.port or 5432, parsed.database) == (
                 deployed.host, deployed.port or 5432, deployed.database)
         safe = (parsed.database.endswith("_test") and not same_database
                 and os.environ.get("TEST_DATABASE_ACK") == "dedicated-disposable-database")

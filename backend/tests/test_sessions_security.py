@@ -20,6 +20,7 @@ from app.core.limits import TokenBucket
 from app.core.settings import Settings, settings
 from app.main import create_app
 from app.rooms.manager import room_manager
+from tests.persistence_double import StrictStore
 
 
 ORIGIN = "http://localhost:5173"
@@ -44,7 +45,7 @@ def client(monkeypatch):
                       rest_rate_burst=10000, ws_upgrade_rate_per_second=10000,
                       ws_upgrade_rate_burst=10000, ws_global_rate_per_second=10000,
                       ws_global_rate_burst=10000)
-    with TestClient(create_app(config)) as test_client:
+    with TestClient(create_app(config, store=StrictStore())) as test_client:
         yield test_client
 
 

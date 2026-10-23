@@ -6,7 +6,7 @@ import { createRoom, joinRoom } from '../net/roomApi'
 import type { Identity } from '../net/types'
 
 type AccueilScreenProps = {
-  onConnected: (identity: Identity) => void
+  onConnected: (identity: Identity, persistenceUnavailable?: boolean) => void
   /** Message d'erreur à afficher si une tentative de reconnexion a échoué
    * (room introuvable/expirée) — voir App.tsx. */
   initialError?: string | null
@@ -51,7 +51,7 @@ export function AccueilScreen({ onConnected, initialError = null }: AccueilScree
     setError(null)
     try {
       const result = await joinRoom(code.trim(), pseudo.trim(), joinRole)
-      onConnected({ version: 2, code: result.code, localPlayerId: result.localPlayerId, sessionToken: result.sessionToken, autoResume: true })
+      onConnected({ version: 2, code: result.code, localPlayerId: result.localPlayerId, sessionToken: result.sessionToken, autoResume: true }, result.persistenceUnavailable === true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erreur inconnue.')
     } finally {

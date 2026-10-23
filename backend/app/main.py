@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.api.rooms import router as rooms_router
 from app.api.ws import router as ws_router
@@ -15,11 +15,13 @@ from app.api import rooms, ws
 from app.core.limits import TokenBucket
 from app.core.settings import Settings, settings
 from app.rooms.manager import room_manager as manager
+from app.persistence.config import DatabaseConfig
+from app.persistence.store import PostgresStore
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
-def create_app(config: Settings | None = None, static_dir: Path | None = None) -> FastAPI:
+def create_app(config: Settings | None = None, static_dir: Path | None = None, *, store=None) -> FastAPI:
     configuration = settings if config is None else config
     root = (_STATIC_DIR if static_dir is None else static_dir).resolve()
 
@@ -33,14 +35,20 @@ def create_app(config: Settings | None = None, static_dir: Path | None = None) -
         rooms.rest_bucket = TokenBucket(settings.rest_rate_per_second, settings.rest_rate_burst)
         ws.upgrade_bucket = TokenBucket(settings.ws_upgrade_rate_per_second, settings.ws_upgrade_rate_burst)
         ws.global_bucket = TokenBucket(settings.ws_global_rate_per_second, settings.ws_global_rate_burst)
-        cleanup = asyncio.create_task(manager.cleanup_loop(), name="room-idle-cleanup")
-        application.state.cleanup_task = cleanup
+        manager.store = store if store is not None else PostgresStore(DatabaseConfig.from_environment())
+        cleanup = None
         try:
+            await manager.start()
+            cleanup = asyncio.create_task(manager.cleanup_loop(), name="room-idle-cleanup")
+            application.state.cleanup_task = cleanup
             yield
         finally:
-            cleanup.cancel()
-            with suppress(asyncio.CancelledError):
-                await cleanup
+            manager.started = False
+            if cleanup is not None:
+                cleanup.cancel()
+                with suppress(asyncio.CancelledError):
+                    await cleanup
+            await manager.store.close()
 
     application = FastAPI(title="Le Grand Tunneg", lifespan=lifespan)
     application.state.settings = configuration
@@ -61,6 +69,14 @@ def create_app(config: Settings | None = None, static_dir: Path | None = None) -
     @application.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @application.get("/health/ready")
+    async def ready() -> JSONResponse:
+        if not await manager.ready():
+            raise HTTPException(status_code=503, detail={
+                "code": "persistence_unavailable", "message": "Room persistence unavailable.",
+            }, headers={"Cache-Control": "no-store"})
+        return JSONResponse({"status": "ready"}, headers={"Cache-Control": "no-store"})
 
     @application.get("/{full_path:path}")
     async def spa_fallback(full_path: str) -> FileResponse:

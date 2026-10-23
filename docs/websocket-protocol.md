@@ -9,9 +9,44 @@ updated: 2026-10-20
 Contrat incompatible avec le premier jalon `c3fdbf6`. La spec de référence est
 [`bloc-13-multi-consolidation-contract`](specs/bloc-13-multi-consolidation-contract.md).
 Les preuves d'exécution et limites sont dans [la validation Bloc 13](validation-bloc-13.md).
-Un seul process possède les rooms en mémoire : aucun compte, aucune sauvegarde,
-aucune reprise après redémarrage. Déployer pendant une fenêtre sans partie et
-recharger les clients. Plusieurs workers/réplicas ne sont pas supportés.
+Un seul process gere les sockets et le cache des rooms. Postgres est le seul
+store applicatif ; les snapshots prives, sessions hachees et evenements sont
+archives atomiquement avant installation/publication. Le startup restaure puis
+committe les presences absentes avant admission, sans changer acteur/sous-phase.
+Plusieurs workers/replicas ne sont pas supportes. Raccordement en revue, preuve
+sur vraie base et activation Railway encore differees.
+
+## Persistance Et Disponibilite
+
+Creation, adhesion, presence, commandes, reset, fermeture et expiration attendent
+le commit. Aucun secret brut n'est conserve. UUID room stable, UUID game nouveau
+sur reset uniquement ; revisions et anciennes parties conservees indefiniment.
+Une erreur connue ne publie/installe pas le candidat. Un COMMIT inconnu ou
+conflit OCC impose un unique readback borne, sans rejeu. Une ancienne revision
+confirmee libere le blocage ; confirmation complete du candidat l'installe et
+permet completion/publication seulement sans overlay et avec autorite valide.
+Attach non installe : absence durable reconciliee avant de debloquer.
+Divergence/absence/timeout restent bloquants ; code de creation
+reserve, readiness false. Aucun retry de commande automatique.
+
+HTTP : 503 `persistence_unavailable`, message `Room persistence unavailable.`,
+`Cache-Control: no-store`. WS : meme code/message dans `error` ; pendant auth,
+fermeture transitoire 1013 ensuite, jamais un terminal de revocation. Pendant jeu,
+la socket peut recevoir l'erreur mais aucune mutation bloquee n'est rejouee.
+La perte physique retire immediatement l'objet socket exact de l'autorite, meme
+si le verrou ou Postgres est bloque. L'overlay absence empeche toute commande et
+publication jusqu'a persistence ; echec de detach => room bloquee jusqu'au restart.
+
+`/health` est la liveness. `/health/ready` exige restauration terminee, absence
+de room/creation/overlay bloque et verification bornee du schema en base ; 503
+sinon. Apres crash, deadline UTC existante inchangee et expiration archivee avant
+readiness. Un seul check readiness simultane par processus, sans queue : saturation
+503 sanitise no-store, budget de verification 2s (nettoyage DB borne en supplement).
+Le slot est libere en finally, meme sur annulation ; aucun check DB si une room
+est deja bloquee. Les succes ready sont aussi no-store.
+Les sockets authentifiees renouvellent la liveness au plus toutes les
+60 secondes ; idle TTL 24h par defaut. REST sans socket ne prolonge pas l'idle.
+Les migrations restent une commande operateur explicite avant start.
 
 ## Identité Et REST
 
@@ -32,6 +67,31 @@ secret, ne change pas la présence et ne diffuse rien. Une preuve incorrecte ne
 devient jamais une nouvelle adhésion. Codes de room normalisés en majuscules.
 REST laisse `connected: false` jusqu'à l'authentification WS. Les réponses
 create/join, erreurs comprises, portent `Cache-Control: no-store`.
+
+Une nouvelle adhesion deja confirmee ne devient pas un faux echec 503 si un autre
+transport disparait pendant son commit. La presence est reconciliee avant la
+reponse ; si cette correction echoue, HTTP 200 confirme seulement l'adhesion et
+rend sa preuve lorsque le transport HTTP le permet, avec `state: null` et
+`persistenceUnavailable: true` (aucune garantie exactly-once HTTP). Conserver
+cette identite, ne pas recreer un membre : reprise avec preuve et auth WS restent
+503/1013 tant que la room est bloquee. Aucun etat public incoherent n'est diffuse.
+Apres chaque correction de presence committee, le snapshot corrige est mis dans
+le slot borne de chaque destinataire encore autorise, meme si l'attach initial
+echoue ; aucun futur nettoyage de socket n'est requis pour cette notification.
+Le client affiche l'indisponibilite du recu et des erreurs stockage pre-auth/1013,
+conserve l'identite en localStorage et reprend avec cette preuve, y compris apres
+reload, sans nouvelle adhesion. Seul un sync WS authentifie ouvre le jeu.
+Un snapshot deja en attente est aussi jete sous verrou avant extraction si la
+room est bloquee ou possede un overlay ; pas de polling ni de sync obsolete.
+Apres attente du verrou d'envoi, un snapshot extrait revalide aussi la disponibilite
+et l'autorite exacte socket/delivery juste avant l'entree dans `send_json`, sans
+nouvel await intermediaire. Un snapshot refuse n'acquitte pas l'authentification.
+Le budget unique d'envoi inclut cette attente ; erreurs ciblees restent distinctes.
+Ce point de linearisation precede le premier await interne du transport : une
+trame deja entree dans ASGI ne peut pas etre rappelee si l'etat change ensuite.
+Pas de verrou de room pendant l'I/O ni de garantie sur l'instant de reception.
+Un frame disconnect recu retire immediatement l'autorite et declenche le detach
+durable, sans tenter une fermeture transport_failed 1011 sur ce transport ferme.
 
 Corps JSON strict : champs exacts, aucun coercing, noms trimés avant contrôle,
 limite brute 8192 octets par défaut avant décodage. Erreurs HTTP :
@@ -194,8 +254,9 @@ d'identité/déconnexion volontaire. Déconnexion volontaire et remplacement :
 preuve conservée, `autoResume:false` persisté, bouton Reprendre explicite, même
 après reload. Révoqué/retiré/room fermée effacent la preuve utilisable; tous les
 terminaux gardent l'explication visible. 1008/1009/4429 demandent une action
-explicite, 4408 et pannes réseau sont transitoires. Room perdue après restart :
-reprise terminée, pas une sauvegarde durable.
+explicite, 4408/1013 et pannes reseau sont transitoires. Apres restart, les preuves
+restaurees permettent la reprise si la room n'a pas expire ; aucune commande
+sans acquittement n'est rejouee.
 
 ## Ressources
 
@@ -205,15 +266,23 @@ Configuration et commande de production : [README](../README.md). Défauts :
 200 sockets authentifiées (anciennes remplacées jusqu'à fermeture comprises),
 envoi/fermeture 2s. Buckets monotones initialement pleins : REST 5/s burst20,
 upgrade 10/s burst20, commandes 20/s burst40/socket et 200/s burst400 global.
-Pas de backlog dormant ni de map IP illimitée; headers proxy non fiables par
+Un seul lecteur transport continue pendant les writes DB, avec au maximum le
+burst commande (40 par defaut) en attente ; saturation envoie `error/rate_limited`
+puis ferme une seule fois en 4429. Cette cause transport reste prioritaire sur
+un echec/une annulation de nettoyage DB, pendant auth comme apres auth ; aucune
+fermeture 1013 concurrente. Disconnect
+retire immediatement l'autorite sans attendre DB/verrou. Auth en attente reserve
+sa place globale avant persistance, anciennes remplacees comprises jusqu'au cleanup.
+REST : 32 operations globales, corps/lock/DB compris, admission sans queue et 503
+no-store a saturation ; timeout 15s plus budgets DB de resolution/nettoyage.
+Pas de backlog illimite ni de map IP illimitée; headers proxy non fiables par
 défaut. L'absence de toute socket authentifiée (écrans inclus) démarre un TTL
 monotone de 86400s, sweep 60s annulé/attendu au shutdown. REST, preauth et preuves
 invalides ne rafraîchissent pas ce TTL; auth à la borne d'expiration échoue.
 
-## Preparation Postgres
+## Validation Postgres
 
-La preparation de stockage decrite dans `schema.md` n'est pas branchee aux routes
-ni au manager. Le protocole actif demeure celui du Bloc 13, en memoire. Aucun
-nouveau succes durable, reprise serveur, code d'erreur storage WS ou endpoint de
-readiness n'est revendique. Voir `validation-persistance-postgres.md` avant toute
-activation ; aucun client ne doit rejouer automatiquement une commande ambigue.
+Le raccordement est implemente mais pas encore approuve ni prouve sur Postgres
+reel. Voir `validation-persistance-postgres.md` avant toute activation. Les tests
+offline et HTTP/WS injectent directement des doubles sous `backend/tests/` ; ils
+ne constituent pas une preuve de durabilite, migration ou contraintes Postgres.

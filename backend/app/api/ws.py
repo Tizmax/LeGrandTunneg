@@ -11,6 +11,7 @@ from app.core.limits import TokenBucket
 from app.core.settings import settings
 from app.game import engine
 from app.rooms.manager import CapacityError, RoomNotFoundError, UnknownParticipantError, room_manager
+from app.persistence.store import PersistenceUnavailable
 
 router = APIRouter()
 upgrade_bucket = TokenBucket(settings.ws_upgrade_rate_per_second, settings.ws_upgrade_rate_burst)
@@ -104,12 +105,44 @@ async def websocket_endpoint(websocket: WebSocket, code: str) -> None:
         return
     if (not upgrade_bucket.consume()
             or room_manager.preauth_connections >= settings.max_preauth_connections
-            or len(room_manager.authenticated_connections) >= settings.max_authenticated_connections):
+            or len(room_manager.authenticated_connections) + len(room_manager.auth_reservations)
+            >= settings.max_authenticated_connections):
         await deny(websocket, 429)
         return
     room_manager.preauth_connections += 1
     reserved = True
     room, pid = None, None
+    reader = None
+    messages = asyncio.Queue(maxsize=settings.ws_command_rate_burst)
+    transport_ended = asyncio.Event()
+    transport_close = None
+    transport_disconnected = False
+
+    async def read_transport():
+        nonlocal transport_close, transport_disconnected
+        try:
+            while True:
+                try:
+                    message = await receive(websocket)
+                except engine.GameError:
+                    message = None
+                try:
+                    messages.put_nowait(message)
+                except asyncio.QueueFull:
+                    # No unbounded command backlog while the processor awaits DB.
+                    transport_close = (4429, "rate_limited")
+                    return
+        except OverflowError:
+            transport_close = (1009, "")
+        except WebSocketDisconnect:
+            transport_disconnected = True
+        except (RuntimeError, OSError):
+            pass
+        finally:
+            room_manager.lost_transports.add(websocket)
+            room_manager.lose_connection(room, pid, websocket)
+            transport_ended.set()
+
     try:
         await websocket.accept()
         try:
@@ -119,11 +152,14 @@ async def websocket_endpoint(websocket: WebSocket, code: str) -> None:
                     invalid()
                 pid = auth["payload"]["localPlayerId"]
                 room = room_manager.get_room(code)
+                room_manager.reserve_auth(websocket)
+                reader = asyncio.create_task(read_transport())
                 async with room.lock:
-                    previous = room_manager.attach_locked(room, pid, auth["payload"]["sessionToken"], websocket)
+                    previous = await room_manager.attach_locked(room, pid, auth["payload"]["sessionToken"], websocket)
                 del auth
         except TimeoutError:
-            await room_manager.close_socket(websocket, 4408, "auth_timeout")
+            if not transport_ended.is_set():
+                await room_manager.close_socket(websocket, 4408, "auth_timeout")
             return
         except engine.GameError:
             await room_manager.close_socket(websocket, 1008, "invalid_payload")
@@ -137,6 +173,14 @@ async def websocket_endpoint(websocket: WebSocket, code: str) -> None:
         except CapacityError:
             await room_manager.close_socket(websocket, 4429, "rate_limited")
             return
+        except PersistenceUnavailable:
+            if transport_ended.is_set():
+                return
+            await asyncio.wait_for(websocket.send_json({"type": "error", "payload": {
+                "code": PersistenceUnavailable.code, "message": PersistenceUnavailable.message,
+            }}), settings.send_timeout_seconds)
+            await room_manager.close_socket(websocket, 1013, "persistence_unavailable")
+            return
         room_manager.preauth_connections -= 1
         reserved = False
         if previous:
@@ -145,11 +189,12 @@ async def websocket_endpoint(websocket: WebSocket, code: str) -> None:
         await asyncio.wait_for(delivery.acknowledged.wait(), settings.send_timeout_seconds)
         bucket = TokenBucket(settings.ws_command_rate_per_second, settings.ws_command_rate_burst)
         while True:
-            receiving = asyncio.create_task(receive(websocket))
+            receiving = asyncio.create_task(messages.get())
             ending = asyncio.create_task(delivery.ended.wait())
+            disconnected = asyncio.create_task(transport_ended.wait())
             try:
-                done, _ = await asyncio.wait((receiving, ending), return_when=asyncio.FIRST_COMPLETED)
-                if ending in done:
+                done, _ = await asyncio.wait((receiving, ending, disconnected), return_when=asyncio.FIRST_COMPLETED)
+                if ending in done or disconnected in done:
                     return
                 message = receiving.result()
             except engine.GameError:
@@ -157,7 +202,8 @@ async def websocket_endpoint(websocket: WebSocket, code: str) -> None:
             finally:
                 receiving.cancel()
                 ending.cancel()
-                await asyncio.gather(receiving, ending, return_exceptions=True)
+                disconnected.cancel()
+                await asyncio.gather(receiving, ending, disconnected, return_exceptions=True)
             terminals = []
             error = None
             async with room.lock:
@@ -168,53 +214,62 @@ async def websocket_endpoint(websocket: WebSocket, code: str) -> None:
                     room_manager.invalidate_locked(room, websocket, "rate_limited")
                     return
                 try:
-                    room_manager.ensure_live(room)
+                    await room_manager.ensure_live(room)
                     if message is None:
                         invalid()
                     event, payload = validate(message, room)
                     role = room.roles[pid]
                     if role == "ecran-principal":
                         raise engine.GameError("forbidden_role", "Screens cannot issue game commands.")
+                    candidate = room_manager.candidate(room)
                     if event == "room:quit":
                         engine.quit_to_menu(room.state, role)
-                        terminals = [(s, "room_closed") for s in room_manager.close_room_locked(room)]
+                        terminals = [(s, "room_closed") for s in await room_manager.close_room_locked(room)]
                     elif event == "player:remove":
                         target = room.state.players[payload["index"]].id
-                        room.state = engine.remove_player(room.state, payload["index"], role)
-                        room.proofs.pop(target, None)
-                        room.roles.pop(target, None)
-                        room.names.pop(target, None)
-                        target_socket = room.connections.pop(target, None)
-                        if target_socket:
-                            room_manager.invalidate_locked(room, target_socket, "player_kicked")
-                            terminals = [(target_socket, "player_kicked")]
+                        candidate.state = engine.remove_player(room.state, payload["index"], role)
+                        candidate.proofs.pop(target, None)
+                        candidate.roles.pop(target, None)
+                        candidate.names.pop(target, None)
                     elif event == "presenter:transfer":
                         target = payload["targetPlayerId"]
-                        room.state = engine.transfer_presenter(room.state, target, role)
-                        room.roles[room.presentateur_id] = "joueur"
-                        room.roles[target] = "presentateur"
-                        room.presentateur_id = target
+                        candidate.state = engine.transfer_presenter(room.state, target, role)
+                        candidate.roles[room.presentateur_id] = "joueur"
+                        candidate.roles[target] = "presentateur"
+                        candidate.presentateur_id = target
                     elif event == "player:rename":
-                        room.state = engine.rename_player(room.state, role, pid, payload["name"])
-                        room.names[pid] = payload["name"]
+                        candidate.state = engine.rename_player(room.state, role, pid, payload["name"])
+                        candidate.names[pid] = payload["name"]
                     elif event == "player:set_avatar":
-                        room.state = engine.set_player_avatar(room.state, pid, payload["avatar"])
+                        candidate.state = engine.set_player_avatar(room.state, pid, payload["avatar"])
                     elif event == "theme:add":
-                        room.state = engine.add_theme(room.state, payload["label"], role)
+                        candidate.state = engine.add_theme(room.state, payload["label"], role)
                     elif event == "theme:remove":
-                        room.state = engine.remove_theme(room.state, payload["index"], role)
+                        candidate.state = engine.remove_theme(room.state, payload["index"], role)
                     elif event == "theme:select":
-                        room.state = engine.select_theme(room.state, payload["index"], role, pid)
+                        candidate.state = engine.select_theme(room.state, payload["index"], role, pid)
                     elif event in ("answer:continue", "answer:vault"):
                         handler = engine.continue_tunnel if event == "answer:continue" else engine.vault
-                        room.state = handler(room.state, role, pid)
+                        candidate.state = handler(room.state, role, pid)
                     else:
-                        room.state = _EMPTY[event](room.state, role)
+                        candidate.state = _EMPTY[event](room.state, role)
                     if not room.closed:
+                        await room_manager.commit_locked(room, candidate, event, pid, liveness=True)
+                        if event == "player:remove":
+                            target_socket = room.connections.pop(target, None)
+                            if target_socket:
+                                room_manager.invalidate_locked(room, target_socket, "player_kicked")
+                                terminals = [(target_socket, "player_kicked")]
                         room_manager.publish_locked(room)
                 except engine.GameError as exc:
                     error = {"type": "error", "payload": {"code": exc.code, "message": exc.message}}
-            if error:
+                except PersistenceUnavailable:
+                    error = {"type": "error", "payload": {
+                        "code": PersistenceUnavailable.code, "message": PersistenceUnavailable.message,
+                    }}
+                except RoomNotFoundError:
+                    return
+            if error and not transport_ended.is_set():
                 await room_manager.send(room, websocket, error)
             if terminals:
                 await asyncio.gather(*(room_manager.terminal(room, s, reason) for s, reason in terminals))
@@ -225,8 +280,14 @@ async def websocket_endpoint(websocket: WebSocket, code: str) -> None:
     except (WebSocketDisconnect, RuntimeError, TimeoutError, OSError):
         pass
     finally:
+        room_manager.auth_reservations.discard(websocket)
+        if reader:
+            reader.cancel()
+            await asyncio.gather(reader, return_exceptions=True)
         if reserved:
             room_manager.preauth_connections -= 1
         if room is not None and pid is not None:
-            cleanup = asyncio.create_task(room_manager.release(room, pid, websocket))
+            cleanup = asyncio.create_task(room_manager.release(
+                room, pid, websocket, transport_close=transport_close,
+                transport_disconnected=transport_disconnected))
             await asyncio.shield(cleanup)

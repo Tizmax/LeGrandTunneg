@@ -1,4 +1,5 @@
 import type { Role } from './types'
+import type { GameState } from '../game/types'
 import { API_BASE_URL } from './config'
 
 export type CreateRoomResult = {
@@ -13,10 +14,9 @@ export type JoinRoomResult = {
   localPlayerId: string
   role: Role
   sessionToken: string
-  // L'état complet n'est pas utilisé directement (le client WS réémet un
-  // room:state_sync juste après l'ouverture du socket), mais renvoyé par
-  // l'API pour permettre un affichage immédiat avant connexion WS si besoin.
-  state: unknown
+  // Only an authenticated WS snapshot admits gameplay, not this receipt.
+  state: GameState | null
+  persistenceUnavailable?: boolean
 }
 
 async function parseJsonOrThrow<T>(response: Response): Promise<T> {

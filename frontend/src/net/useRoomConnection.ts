@@ -46,7 +46,7 @@ export type RoomConnection = {
  * base de useReducer). `identity` doit rester stable (même référence tant que
  * code/localPlayerId ne changent pas) pour éviter de recréer le socket.
  */
-export function useRoomConnection(identity: Identity | null): RoomConnection {
+export function useRoomConnection(identity: Identity | null, persistenceUnavailable = false): RoomConnection {
   const [status, setStatus] = useState<ConnectionStatus>('idle')
   const [state, setState] = useState<GameState>(initialState)
   const [role, setRole] = useState<Role | null>(null)
@@ -66,7 +66,8 @@ export function useRoomConnection(identity: Identity | null): RoomConnection {
     setState(initialState)
     setRole(null)
     setLocalPlayerId(null)
-    setLastError(null)
+    const persistenceError = { code: 'persistence_unavailable', message: 'Room temporairement indisponible. Votre session est conservée ; reprise avec la même identité.' }
+    setLastError(persistenceUnavailable ? persistenceError : null)
     authenticatedRef.current = false
 
     function detach() {
@@ -92,7 +93,7 @@ export function useRoomConnection(identity: Identity | null): RoomConnection {
       const endings: Record<string, [ConnectionStatus, string]> = {
         session_revoked: ['revoked', 'Session indisponible. Rejoignez explicitement une room.'],
         player_kicked: ['kicked', 'Vous avez été retiré de la room.'],
-        room_closed: ['closed', 'Room fermée ou indisponible. Les sessions ne survivent pas au redémarrage du serveur.'],
+        room_closed: ['closed', 'Room fermée ou indisponible.'],
         session_replaced: ['replaced', 'Session ouverte ailleurs. Reprendre ici remplacera cette autre connexion.'],
       }
       const ending = endings[code]
@@ -152,8 +153,9 @@ export function useRoomConnection(identity: Identity | null): RoomConnection {
           setLocalPlayerId(payload.localPlayerId)
           setState(payload.state)
           setLastError(null)
-        } else if (message.type === 'error' && authenticatedRef.current) {
-          setLastError(message.payload as ErrorPayload)
+        } else if (message.type === 'error') {
+          if (message.payload?.code === 'persistence_unavailable') setLastError(persistenceError)
+          else if (authenticatedRef.current) setLastError(message.payload as ErrorPayload)
         }
       }
       // Browsers emit close after error; wait for its authoritative terminal code.
@@ -163,7 +165,10 @@ export function useRoomConnection(identity: Identity | null): RoomConnection {
         const endings: Record<number, string> = { 4401: 'session_revoked', 4403: 'player_kicked', 4404: 'room_closed', 4409: 'session_replaced' }
         if (endings[event.code]) terminal(endings[event.code])
         else if ([1008, 1009, 4429].includes(event.code)) terminal(`policy_${event.code}`)
-        else reconnect()
+        else {
+          if (event.code === 1013) setLastError(persistenceError)
+          reconnect()
+        }
       }
     }
     disconnectRef.current = () => {
@@ -193,7 +198,7 @@ export function useRoomConnection(identity: Identity | null): RoomConnection {
       disconnectRef.current = () => {}
       resumeRef.current = () => {}
     }
-  }, [identity])
+  }, [identity, persistenceUnavailable])
 
   const send = useCallback((message: OutgoingMessage) => {
     const socket = socketRef.current

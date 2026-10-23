@@ -85,6 +85,8 @@ class Settings:
     max_rest_body_bytes: int = _integer("MAX_REST_BODY_BYTES", 8192)
     rest_body_timeout_seconds: float = _number("REST_BODY_TIMEOUT_SECONDS", 5)
     max_rest_body_readers: int = _integer("MAX_REST_BODY_READERS", 32)
+    max_rest_operations: int = _integer("MAX_REST_OPERATIONS", 32)
+    rest_operation_timeout_seconds: float = _number("REST_OPERATION_TIMEOUT_SECONDS", 15)
     auth_timeout_seconds: float = _number("AUTH_TIMEOUT_SECONDS", 5)
     max_preauth_connections: int = _integer("MAX_PREAUTH_CONNECTIONS", 32)
     max_authenticated_connections: int = _integer("MAX_AUTHENTICATED_CONNECTIONS", 200)

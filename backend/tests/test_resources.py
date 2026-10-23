@@ -13,6 +13,7 @@ from app.core.limits import TokenBucket
 from app.core.origins import websocket_origin_allowed
 from app.core.settings import Settings, settings, valid_origin
 from app.main import create_app
+from tests.persistence_double import StrictStore
 
 
 @pytest.fixture(autouse=True)
@@ -160,7 +161,7 @@ def static_client(tmp_path):
     (tmp_path / "secret.txt").write_text("secret")
     (root / "escape.txt").symlink_to(tmp_path / "secret.txt")
     (root / "escaped-dir").symlink_to(tmp_path, target_is_directory=True)
-    return TestClient(create_app(Settings(), root)), root
+    return TestClient(create_app(Settings(), root, store=StrictStore())), root
 
 
 def test_safe_frontend_and_assets(static_client):
@@ -203,7 +204,7 @@ def test_index_and_asset_directory_symlink_confinement(static_client, tmp_path, 
 
 
 def test_missing_static_directory(tmp_path):
-    client = TestClient(create_app(Settings(), tmp_path / "missing"))
+    client = TestClient(create_app(Settings(), tmp_path / "missing", store=StrictStore()))
     assert client.get("/frontend").status_code == 404
 
 
@@ -213,7 +214,7 @@ def test_startup_refreshes_environment_and_cors(monkeypatch):
     async def cleanup_loop():
         await asyncio.Event().wait()
 
-    application = create_app()
+    application = create_app(store=StrictStore())
     monkeypatch.setenv("ALLOWED_ORIGINS", "https://fresh.example")
     monkeypatch.setenv("MAX_ROOMS", "3")
     with patch.object(manager, "cleanup_loop", cleanup_loop, create=True):
@@ -232,7 +233,7 @@ def test_startup_refreshes_environment_and_cors(monkeypatch):
 
 
 def test_startup_rejects_environment_changed_after_import(monkeypatch):
-    application = create_app()
+    application = create_app(store=StrictStore())
     monkeypatch.setenv("MAX_ROOMS", "0")
     with pytest.raises(ValueError, match="MAX_ROOMS"):
         with TestClient(application):
@@ -245,7 +246,7 @@ def test_injected_configuration_is_shared_with_websocket_checks():
     async def cleanup_loop():
         await asyncio.Event().wait()
 
-    application = create_app(Settings(allowed_origins=("https://custom.example",), max_rooms=3))
+    application = create_app(Settings(allowed_origins=("https://custom.example",), max_rooms=3), store=StrictStore())
     with patch.object(manager, "cleanup_loop", cleanup_loop, create=True):
         with TestClient(application) as client:
             headers = Headers({"origin": "https://custom.example"})
@@ -271,7 +272,7 @@ def test_lifespan_cancels_and_awaits_cleanup():
                 await asyncio.sleep(0)
                 cancelled.set()
 
-        application = create_app(Settings())
+        application = create_app(Settings(), store=StrictStore())
         with patch.object(manager, "cleanup_loop", cleanup_loop, create=True):
             async with application.router.lifespan_context(application):
                 await started.wait()

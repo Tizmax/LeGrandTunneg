@@ -78,6 +78,52 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals() })
 
 describe('App session lifecycle with real room connection', () => {
+  it('keeps a degraded join receipt through preauth failure, reload and recovery without rejoining', async () => {
+    localStorage.clear()
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
+      code: identity.code, localPlayerId: identity.localPlayerId, role: 'joueur',
+      sessionToken: identity.sessionToken, state: null, persistenceUnavailable: true,
+    }), { status: 200 }))
+    const view = render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /^Rejoindre$/ }))
+    fireEvent.change(screen.getByPlaceholderText('Votre pseudo'), { target: { value: 'Alice' } })
+    fireEvent.change(screen.getByPlaceholderText('Code de la room'), { target: { value: identity.code } })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Rejoindre la room' })) })
+    expect(loadStoredIdentity()).toEqual(identity)
+    expect(screen.getByRole('status').textContent).toContain('temporairement indisponible')
+    expect(screen.queryByText('Connected lobby')).toBeNull()
+    act(() => {
+      latest().readyState = 1
+      latest().onopen?.()
+      latest().message('error', { code: 'persistence_unavailable', message: `unsafe ${identity.sessionToken}` })
+      latest().fail(1013)
+    })
+    expect(screen.getByRole('status').textContent).toContain('session est conservée')
+    expect(document.body.textContent).not.toContain(identity.sessionToken)
+    expect(loadStoredIdentity()).toEqual(identity)
+    fireEvent.click(screen.getByRole('button', { name: 'Reprendre la session' }))
+    expect(screen.queryByText('Connected lobby')).toBeNull()
+    view.unmount()
+    render(<App />)
+    act(() => {
+      latest().readyState = 1
+      latest().onopen?.()
+      latest().message('error', { code: 'persistence_unavailable', message: 'Room persistence unavailable.' })
+      latest().fail(1013)
+    })
+    expect(screen.getByRole('status').textContent).toContain('temporairement indisponible')
+    advance(250)
+    act(() => latest().sync(initialState))
+    expect(screen.getByText('Connected lobby')).toBeTruthy()
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(loadStoredIdentity()).toEqual(identity)
+    expect(latest().sent).toEqual([{ type: 'session:auth', payload: {
+      localPlayerId: identity.localPlayerId, sessionToken: identity.sessionToken,
+    } }])
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string)).toEqual({ pseudo: 'Alice', role: 'joueur' })
+  })
+
   it.each([1006, 4408])('retains identity and automatically retries transient close %s without rejoining', (code) => {
     connect()
     expect(audio.startAmbient).toHaveBeenCalledWith('jazz')
